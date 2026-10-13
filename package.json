@@ -1,0 +1,26 @@
+{
+  "name": "breakphish-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "BreakPhish MVP critical-path scaffold: M365 sync → send → tracked click → auto-training.",
+  "scripts": {
+    "demo": "tsx src/demo.ts",
+    "demo:email": "tsx src/emailsec/demo.ts",
+    "demo:onboard": "tsx src/onboardingDemo.ts",
+    "api": "tsx src/apiServer.ts",
+    "server": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "@types/pg": "^8.11.10"
+  }
+}

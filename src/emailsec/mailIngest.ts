@@ -1,0 +1,113 @@
+// Reads REAL inbound mail from Microsoft Graph, normalizes each message into the
+// pipeline's Message shape, and scores it with the same analyze() the demo uses.
+// This is what replaces the synthetic generator for a connected tenant.
+//
+// It runs only in graph mode and needs the Mail.Read application permission
+// (already in the consent scopes). A production build would use Graph change
+// notifications (webhooks) for near-real-time; this polls, which is simpler and
+// enough for a pilot.
+
+import { appToken } from '../directory/graphProvider';
+import { store } from '../store';
+import { getConnection } from '../consent';
+import { analyze } from './pipeline';
+import { emailStore } from './store';
+import type { Message } from './types';
+
+const GRAPH = 'https://graph.microsoft.com/v1.0';
+
+// Graph's internetMessageHeaders include Authentication-Results; parse SPF/DKIM/DMARC.
+function authFromHeaders(headers: Array<{ name: string; value: string }> = []) {
+  const ar = headers.find(h => h.name.toLowerCase() === 'authentication-results')?.value?.toLowerCase() ?? '';
+  const read = (k: string): 'pass' | 'fail' | 'none' =>
+    ar.includes(`${k}=pass`) ? 'pass' : ar.includes(`${k}=fail`) ? 'fail' : 'none';
+  return { spf: read('spf'), dkim: read('dkim'), dmarc: read('dmarc') };
+}
+
+function stripHtml(s: string): string {
+  return (s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
+}
+function extractUrls(s: string): string[] {
+  return Array.from(new Set((s.match(/https?:\/\/[^\s"'<>)]+/gi) ?? []).slice(0, 20)));
+}
+
+function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 'inbox' | 'sentitems'): Message {
+  const from = m.from?.emailAddress ?? {};
+  const fromAddress = (from.address ?? '').toLowerCase();
+  const toAddress = (m.toRecipients?.[0]?.emailAddress?.address ?? '').toLowerCase();
+  const senderDomain = fromAddress.split('@')[1] ?? '';
+  const recipientDomain = toAddress.split('@')[1] ?? '';
+  const internalSender = verifiedDomains.includes(senderDomain);
+  const internalRecipient = verifiedDomains.includes(recipientDomain);
+  const outbound = folder === 'sentitems';
+  // Internal = stays inside the org (both ends verified). Otherwise external.
+  const source: 'internal' | 'external' = internalSender && internalRecipient ? 'internal' : 'external';
+  const bodyText = m.body?.contentType === 'html' ? stripHtml(m.body?.content) : (m.body?.content ?? m.bodyPreview ?? '');
+  return {
+    id: m.id,
+    tenantId,
+    direction: outbound ? 'outbound' : (internalSender ? 'internal' : 'inbound'),
+    source,
+    fromAddress,
+    fromDisplay: from.name ?? fromAddress,
+    to: m.toRecipients?.[0]?.emailAddress?.address ?? '',
+    subject: m.subject ?? '(no subject)',
+    bodyText,
+    receivedAt: m.receivedDateTime ?? new Date().toISOString(),
+    auth: authFromHeaders(m.internetMessageHeaders),
+    replyTo: m.replyTo?.[0]?.emailAddress?.address,
+    // Enrichment we don't have a real source for yet — conservative defaults.
+    // (domain-age + first-time-sender would come from intel / history.)
+    senderDomainAgeDays: 3000,
+    firstTimeSender: false,
+    urls: extractUrls(bodyText),
+    attachments: (m.attachments ?? []).map((a: any) => ({ filename: a.name, contentType: a.contentType })),
+  };
+}
+
+// Pull the most recent inbox messages for one mailbox and score any we haven't
+// seen before. Returns how many new messages were scored.
+async function ingestFolder(tenantId: string, verifiedDomains: string[], userId: string, token: string, folder: 'inbox' | 'sentitems', top = 25): Promise<number> {
+  const select = folder === 'sentitems'
+    ? 'id,subject,from,sender,toRecipients,sentDateTime,bodyPreview,body,internetMessageHeaders'
+    : 'id,subject,from,toRecipients,replyTo,receivedDateTime,bodyPreview,body,internetMessageHeaders';
+  const url =
+    `${GRAPH}/users/${encodeURIComponent(userId)}/mailFolders/${folder}/messages` +
+    `?$top=${top}&$select=${select}&$expand=attachments($select=name,contentType)`;
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`mail read failed for ${userId}/${folder}: ${res.status} ${await res.text()}`);
+  const json = (await res.json()) as { value: any[] };
+
+  let scored = 0;
+  for (const m of json.value ?? []) {
+    // sentitems lack receivedDateTime — fall back to sentDateTime.
+    if (!m.receivedDateTime && m.sentDateTime) m.receivedDateTime = m.sentDateTime;
+    if (emailStore.analysisFor(m.id)) continue; // already scored — skip
+    await analyze(normalize(tenantId, verifiedDomains, m, folder));
+    scored++;
+  }
+  return scored;
+}
+
+async function ingestMailbox(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, token: string): Promise<number> {
+  let n = 0;
+  n += await ingestFolder(tenantId, verifiedDomains, userId, token, 'inbox');
+  n += await ingestFolder(tenantId, verifiedDomains, userId, token, 'sentitems');
+  return n;
+}
+
+// Ingest inbox mail for every synced user of a connected tenant.
+export async function ingestTenantMail(tenantId: string): Promise<{ mailboxes: number; scored: number }> {
+  const conn = getConnection(tenantId);
+  const t = store.getTenant(tenantId);
+  if (!conn?.entraTenantId || !t) throw new Error('tenant not connected');
+
+  const token = await appToken(conn.entraTenantId);
+  const users = store.usersForTenant(tenantId).filter(u => u.enabled);
+  let scored = 0;
+  for (const u of users) {
+    try { scored += await ingestMailbox(tenantId, conn.entraTenantId, t.verifiedDomains, u.externalId, token); }
+    catch (e) { console.error(`[mailIngest] ${u.email}:`, (e as Error).message); }
+  }
+  return { mailboxes: users.length, scored };
+}

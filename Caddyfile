@@ -1,0 +1,7 @@
+# Replace breakphish.example.com with your real domain. Caddy will obtain and
+# auto-renew a Let's Encrypt certificate for it, and proxy to the app container.
+
+breakphish.example.com {
+    reverse_proxy app:4000
+    encode zstd gzip
+}

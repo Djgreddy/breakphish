@@ -1,0 +1,43 @@
+# Single-droplet pilot: the app plus a Caddy reverse proxy that gets+renews a
+# Let's Encrypt certificate automatically for your domain.
+#
+# Before `docker compose up -d`:
+#   1. copy .env.production.example → .env and fill it in
+#   2. edit Caddyfile: replace breakphish.example.com with your domain
+#   3. point that domain's A record at this droplet's public IP
+
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # Build info for the Settings page, set by deploy.sh at deploy time.
+      - GIT_COMMIT=${GIT_COMMIT:-}
+      - GIT_BRANCH=${GIT_BRANCH:-}
+      - GIT_COMMITTED_AT=${GIT_COMMITTED_AT:-}
+    restart: unless-stopped
+    expose:
+      - "4000"            # internal only; Caddy talks to it, not the internet
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+  # ---------------------------------------------------------------------------
+  # When you wire the Postgres store + Redis queue (see README "Going from mock
+  # to real"), prefer DO MANAGED Postgres/Redis over containers on this droplet.
+  # Put their connection strings in .env; no services needed here.
+  # ---------------------------------------------------------------------------
+
+volumes:
+  caddy_data:
+  caddy_config:

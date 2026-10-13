@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BreakPhish — Console (live)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#141b2e;--sidebar1:#191f3d;--sidebar2:#201747;--bg:#f5f6fb;--surface:#fff;--surface2:#fafbfe;
+  --line:#e7e9f3;--line2:#eef0f7;--txt:#1c2338;--muted:#6b7490;--faint:#9aa1b6;
+  --brand:#4f46e5;--teal:#0ea5a3;
+  --ok:#15a34a;--ok-bg:#e9f7ef;--warn:#c9820a;--warn-bg:#fbf1dd;--danger:#e11d48;--danger-bg:#fde7ec;
+  --info:#0284c7;--info-bg:#e2f1fb;--violet:#7c3aed;--violet-bg:#f0e9fd;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;--sans:'Hanken Grotesk',system-ui,sans-serif;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0);padding-bottom:env(safe-area-inset-bottom,0);
+}
+*,*::before,*::after{box-sizing:inherit}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}a{color:inherit;text-decoration:none}
+h1,h2,h3{margin:0;font-weight:700;letter-spacing:-.01em}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+#app{display:grid;grid-template-columns:230px 1fr;min-height:100%}
+.sidebar{background:linear-gradient(176deg,var(--sidebar1),var(--sidebar2));color:#c7cbe4;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 20px 14px}
+.brand .mark{width:32px;height:32px;filter:drop-shadow(0 4px 10px rgba(79,70,229,.5))}
+.brand .nm{font-weight:800;font-size:17px;color:#fff}.brand .nm span{color:#8b93f7}
+.brand .live{margin-left:auto;font-size:9px;font-weight:700;letter-spacing:.06em;color:#4ade80;border:1px solid #4ade8044;padding:2px 6px;border-radius:5px}
+nav.menu{padding:8px 12px;flex:1;overflow:auto}
+nav.menu a{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:9px;color:#aeb4d6;font-weight:500;font-size:13.5px;margin-bottom:2px;position:relative}
+nav.menu a svg{width:18px;height:18px}
+nav.menu a:hover{color:#fff;background:rgba(255,255,255,.06)}
+nav.menu a.active{color:#fff;background:rgba(255,255,255,.1)}
+nav.menu a.active::before{content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--brand)}
+.side-foot{padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#8890b8}
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:14px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.ctx{font-size:14px;font-weight:600}.banner{font-size:12.5px;padding:5px 12px;background:var(--violet-bg);color:var(--violet);border-radius:8px;font-weight:600}
+.spacer{flex:1}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:9px;font-weight:600;font-size:13px;background:var(--surface);border:1px solid var(--line);color:var(--txt)}
+.btn:hover{border-color:#cfd4e6}.btn.primary{background:var(--brand);color:#fff;border-color:transparent}.btn.primary:hover{background:#4338ca}
+.btn.sm{padding:6px 11px;font-size:12px}.btn.ok{background:var(--ok-bg);color:var(--ok);border-color:transparent}
+.btn.teal{background:var(--teal);color:#fff;border-color:transparent}
+.view{padding:24px 26px 60px;max-width:1240px;width:100%}
+.ph{margin-bottom:20px}.ph h1{font-size:22px}.ph p{color:var(--muted);font-size:13px;margin-top:3px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px}.card.p{padding:18px}
+.card-h{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line2)}.card-h h3{font-size:14.5px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;font-size:11px;color:var(--faint);font-weight:600;padding:11px 16px;border-bottom:1px solid var(--line2);white-space:nowrap}
+tbody td{padding:12px 16px;border-bottom:1px solid var(--line2);vertical-align:middle}tbody tr:last-child td{border-bottom:none}
+tbody tr.ck{cursor:pointer}tbody tr.ck:hover{background:var(--surface2)}
+.co{display:flex;align-items:center;gap:11px}.co .lg{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;font-weight:700;font-size:12px;color:#fff;flex:none}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:7px;white-space:nowrap}
+.pill .d{width:6px;height:6px;border-radius:50%}
+.p-ok{background:var(--ok-bg);color:var(--ok)}.p-warn{background:var(--warn-bg);color:var(--warn)}.p-danger{background:var(--danger-bg);color:var(--danger)}
+.p-info{background:var(--info-bg);color:var(--info)}.p-violet{background:var(--violet-bg);color:var(--violet)}.p-muted{background:var(--line2);color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:16px}
+.stats .s{padding:16px 18px;border-right:1px solid var(--line2)}.stats .s:last-child{border:none}
+.stats .l{font-size:12px;color:var(--muted)}.stats .v{font-size:27px;font-weight:800;font-family:var(--mono);margin-top:5px}
+.brk{display:flex;flex-direction:column;gap:13px;padding:18px}
+.brk .r{display:grid;grid-template-columns:140px 1fr 86px;align-items:center;gap:14px}
+.brk .bar{height:10px;background:var(--line2);border-radius:6px;overflow:hidden}.brk .bar>span{display:block;height:100%;border-radius:6px}
+.brk .vl{text-align:right;font-size:12.5px;color:var(--muted);font-family:var(--mono)}
+.filters{display:flex;gap:8px;padding:12px 18px;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+.filters input,.filters select{border:1px solid var(--line);border-radius:8px;padding:7px 11px;font-size:12.5px;font-family:inherit;background:var(--surface2)}
+.pager{display:flex;align-items:center;gap:8px;padding:12px 18px;font-size:12.5px;color:var(--muted)}.pager button{width:30px;height:30px;border:1px solid var(--line);border-radius:8px}.pager button:disabled{opacity:.4}
+.scrim{position:fixed;inset:0;background:rgba(20,27,46,.5);z-index:100;display:none;align-items:flex-start;justify-content:center;padding:40px 20px;overflow:auto}.scrim.open{display:flex}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:620px;box-shadow:0 36px 90px -20px rgba(20,27,46,.5);overflow:hidden}
+.modal-h{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line2)}.modal-h h2{font-size:16px;flex:1}
+.modal-x{width:30px;height:30px;border-radius:8px;background:var(--surface2);border:1px solid var(--line);display:grid;place-items:center;color:var(--muted)}
+.modal-b{padding:20px}.kv{display:grid;grid-template-columns:120px 1fr;gap:8px 14px;font-size:13px}.kv .k{color:var(--muted)}
+.sig{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line2)}.sig:last-child{border:none}
+.sig .ic{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;flex:none;font-weight:700}
+.sig .w{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint)}
+.field{margin-bottom:14px}.field label{display:block;font-size:12.5px;font-weight:600;margin-bottom:6px;color:var(--muted)}
+.field input,.field select{width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;font-family:inherit}
+.loading{padding:50px;text-align:center;color:var(--faint)}
+.spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:sp .7s linear infinite;margin:0 auto 12px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:11px;font-size:13px;font-weight:500;opacity:0;transition:.22s;z-index:200}.toast.show{opacity:1;transform:translateX(-50%)}
+@media(max-width:900px){#app{grid-template-columns:1fr}.sidebar{display:none}.stats{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 40 40" fill="none"><path d="M20 3l14 5v9c0 9-6 15.5-14 18.5C12 32.5 6 26 6 17V8l14-5z" fill="url(#g)"/><path d="M14 20l4 4 8-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><defs><linearGradient id="g" x1="6" y1="3" x2="34" y2="35"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs></svg>
+      <div class="nm">Break<span>Phish</span></div><div class="live">● LIVE API</div>
+    </div>
+    <nav class="menu" id="nav"></nav>
+    <div class="side-foot" id="foot">Partner · reading from /api</div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="ctx" id="ctx">Customers</div>
+      <div class="banner" id="banner" style="display:none"></div>
+      <div class="spacer"></div>
+      <button class="btn primary" id="newBtn" onclick="openWizard()">+ New customer</button>
+      <button class="btn" id="backBtn" style="display:none" onclick="backToPartner()">← Partner view</button>
+      <span id="who" style="font-size:12.5px;color:var(--muted);display:none"></span>
+      <button class="btn sm" id="logoutBtn" style="display:none" onclick="logout()">Sign out</button>
+    </header>
+    <main class="view" id="view"><div class="loading"><div class="spin"></div>Loading…</div></main>
+  </div>
+</div>
+<div class="scrim" id="scrim" onclick="if(event.target===this)closeModal()"><div id="modalHost"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API='/api';
+async function api(path,opts){const r=await fetch(API+path,opts);if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.status);return r.json();}
+function el(h){h=h.trim();if(/^<tr\b/i.test(h)){const t=document.createElement('table');t.innerHTML='<tbody>'+h+'</tbody>';return t.querySelector('tr');}if(/^<t[dh]\b/i.test(h)){const t=document.createElement('table');t.innerHTML='<tbody><tr>'+h+'</tr></tbody>';return t.querySelector('td,th');}const d=document.createElement('div');d.innerHTML=h;return d.firstChild;}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2400);}
+function initials(s){return s.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();}
+const COLORS=['#4f46e5','#0ea5a3','#c9820a','#7c3aed','#2563eb','#db2777'];
+
+const VERDICT_CLS={clean:'p-ok',spam:'p-warn',spam_likely:'p-warn',phishing:'p-danger',malware:'p-danger',impersonation:'p-danger',policy_infomail:'p-info',policy_geo:'p-info'};
+const VERDICT_BAR={clean:'var(--ok)',spam:'var(--warn)',spam_likely:'var(--warn)',phishing:'var(--danger)',malware:'var(--danger)',impersonation:'var(--danger)',policy_infomail:'var(--info)',policy_geo:'var(--info)'};
+const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p-violet'};
+const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated'};
+const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
+
+const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',page:0,session:null};
+
+/* ---------- auth ---------- */
+async function boot(){
+  try{ const {session}=await authGet('/auth/me'); applySession(session); }
+  catch(e){ renderLogin(); }
+}
+function applySession(session){
+  STATE.session=session;
+  if(session.role==='partner_admin'){STATE.role='partner';STATE.customerId=null;STATE._cust=null;}
+  else{STATE.role='admin';STATE.customerId=session.customerId;STATE._cust={id:session.customerId,name:session.customerName,domain:session.customerDomain};}
+  document.getElementById('who').style.display='inline';
+  document.getElementById('who').textContent=session.name;
+  document.getElementById('logoutBtn').style.display='inline-flex';
+  go(STATE.role==='partner'?'customers':'dashboard');
+}
+async function renderLogin(){
+  document.getElementById('newBtn').style.display='none';
+  document.getElementById('backBtn').style.display='none';
+  document.getElementById('logoutBtn').style.display='none';
+  document.getElementById('who').style.display='none';
+  document.getElementById('banner').style.display='none';
+  document.getElementById('nav').innerHTML='';
+  document.getElementById('foot').textContent='Not signed in';
+  document.getElementById('ctx').textContent='Sign in';
+  const host=document.getElementById('view');
+  host.innerHTML='<div class="loading"><div class="spin"></div>Loading sign-in…</div>';
+  let data;try{data=await authGet('/auth/personas');}catch(e){host.innerHTML='<div class="card p">Auth unavailable</div>';return;}
+  const wrap=el('<div style="max-width:420px;margin:60px auto 0"></div>');
+  wrap.appendChild(el(`<div class="card p" style="text-align:center">
+    <svg width="48" height="48" viewBox="0 0 40 40" fill="none" style="margin:0 auto 10px"><path d="M20 3l14 5v9c0 9-6 15.5-14 18.5C12 32.5 6 26 6 17V8l14-5z" fill="#4f46e5"/><path d="M14 20l4 4 8-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+    <h2 style="font-size:19px">Sign in to BreakPhish</h2>
+    <p style="color:var(--muted);font-size:13px;margin:6px 0 18px">${data.provider==='entra'?'Use your Microsoft work account':'Choose an account (mock SSO)'}</p>
+    <div id="personas"></div></div>`));
+  const list=wrap.querySelector('#personas');
+  if(data.provider==='entra'){
+    const b=el('<button class="btn primary" style="width:100%;justify-content:center">Sign in with Microsoft</button>');
+    b.onclick=()=>location.href='/auth/login';list.appendChild(b);
+  }else{
+    data.personas.forEach(p=>{
+      const b=el(`<button class="btn" style="width:100%;justify-content:center;margin-bottom:8px">${p.label}</button>`);
+      b.onclick=()=>doLogin(p.id);list.appendChild(b);
+    });
+    if(!data.personas.length)list.appendChild(el('<div style="color:var(--faint);font-size:13px">No connected tenants yet.</div>'));
+  }
+  host.innerHTML='';host.appendChild(wrap);
+}
+async function authGet(path){const r=await fetch(path);if(!r.ok)throw new Error(r.status);return r.json();}
+async function doLogin(persona){
+  try{const {session}=await authPost('/auth/login/mock',{persona});applySession(session);toast('Signed in as '+session.name);}
+  catch(e){toast('Sign-in failed');}
+}
+async function authPost(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.status);return r.json();}
+async function logout(){await authPost('/auth/logout');STATE.session=null;renderLogin();}
+
+const ICONS={home:'M4 11l8-7 8 7M6 10v9a1 1 0 001 1h10a1 1 0 001-1v-9',mail:'M3 5h18v14H3zM4 7l8 6 8-6',grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',users:'M9 8a3 3 0 100 6 3 3 0 000-6zM3 20c0-3 3-5 6-5s6 2 6 5',shield:'M12 3l7 2.5V11c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V5.5z',lock:'M5 10h14v10H5zM8 10V7a4 4 0 018 0v3',gear:'M12 9a3 3 0 100 6 3 3 0 000-6zM12 3v3M12 18v3M4 12H1M23 12h-3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1'};
+function icon(n){return `<svg viewBox="0 0 24 24" fill="none"><path d="${ICONS[n]}" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>`;}
+const NAV_PARTNER=[['customers','Customers','grid'],['settings','Settings','gear']];
+const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Live Email Tracker','mail'],['quarantine','Quarantine','lock'],['users','Users','users'],['policy','Policy','shield']];
+function renderNav(){
+  const nav=document.getElementById('nav');nav.innerHTML='';
+  (STATE.role==='partner'?NAV_PARTNER:NAV_ADMIN).forEach(([id,label,ic])=>{
+    const a=el(`<a href="#">${icon(ic)}<span>${label}</span></a>`);
+    if(id===STATE.view)a.classList.add('active');
+    a.onclick=(e)=>{e.preventDefault();go(id);};nav.appendChild(a);
+  });
+}
+function chrome(){
+  document.getElementById('newBtn').style.display=STATE.role==='partner'?'inline-flex':'none';
+  document.getElementById('backBtn').style.display=(STATE.session&&STATE.session.impersonating)?'inline-flex':'none';
+  const b=document.getElementById('banner');
+  if(STATE.role==='admin'&&STATE._cust){b.style.display='block';b.textContent='Logged in as: '+STATE._cust.name;document.getElementById('foot').textContent='Administrator · '+STATE._cust.domain;}
+  else{b.style.display='none';document.getElementById('foot').textContent='Partner · reading from /api';}
+  renderNav();
+}
+async function go(view){
+  STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';
+  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Live Email Tracker',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings'})[view]||view;
+  chrome();
+  const host=document.getElementById('view');host.innerHTML='<div class="loading"><div class="spin"></div>Loading live data…</div>';
+  try{const node=await VIEWS[view]();host.innerHTML='';host.appendChild(node);}
+  catch(e){host.innerHTML=`<div class="card p" style="color:var(--danger)">Error: ${e.message}</div>`;}
+}
+async function loginAs(c){
+  try{const {session}=await authPost('/auth/impersonate',{customerId:c.id});applySession(session);toast('Now managing '+c.name);}
+  catch(e){toast('Cannot impersonate: '+e.message);}
+}
+async function backToPartner(){
+  try{const {session}=await authPost('/auth/stop-impersonating');applySession(session);}
+  catch(e){toast(e.message);}
+}
+
+const VIEWS={};
+
+VIEWS.customers=async function(){
+  const customers=await api('/customers');
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph"><h1>Customers</h1><p>Live from the pipeline · ${customers.length} organizations</p></div>`));
+  const card=el('<div class="card"></div>');
+  const tbl=el(`<table><thead><tr><th>Company</th><th>Domain</th><th>Products</th><th>Connection</th><th>Synced users</th><th>Threats (live)</th><th>Access</th></tr></thead><tbody></tbody></table>`);
+  const tb=tbl.querySelector('tbody');
+  customers.forEach((c,i)=>{
+    const prods=c.products.map(p=>p==='email_security'?'<span class="pill p-info">Email Security</span>':'<span class="pill p-violet">Awareness</span>').join(' ');
+    const conn=c.connection.status==='connected'
+      ?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Connected</span>'
+      :'<span class="pill p-muted">Awaiting consent</span>';
+    const row=el(`<tr class="${c.connection.status==='connected'?'ck':''}">
+      <td><div class="co"><div class="lg" style="background:${COLORS[i%COLORS.length]}">${initials(c.name)}</div><div style="font-weight:600">${c.name}</div></div></td>
+      <td style="color:var(--muted)">${c.domain}</td><td>${prods}</td><td>${conn}</td>
+      <td class="mono">${c.syncedUsers||'—'}</td>
+      <td class="mono" style="color:${c.threats?'var(--danger)':'var(--muted)'}">${c.connection.status==='connected'?c.threats:'—'}</td>
+      <td></td></tr>`);
+    const act=row.children[6];
+    if(c.connection.status==='connected'){const b=el('<button class="btn ok sm">Login as →</button>');b.onclick=(e)=>{e.stopPropagation();loginAs(c);};act.appendChild(b);row.onclick=()=>loginAs(c);}
+    else{const b=el('<button class="btn teal sm">Connect Microsoft 365</button>');b.onclick=async(e)=>{e.stopPropagation();b.textContent='Connecting…';b.disabled=true;
+      try{const r=await api('/customers/'+c.id+'/connect',{method:'POST'});
+        if(r.redirect){toast('Opening Microsoft consent…');window.location.href=r.redirect;return;}
+        toast('Connected & synced '+c.name);go('customers');}
+      catch(err){toast('Connect failed: '+err.message);b.textContent='Connect Microsoft 365';b.disabled=false;}
+    };act.appendChild(b);}
+    tb.appendChild(row);
+  });
+  card.appendChild(tbl);v.appendChild(card);
+  return v;
+};
+
+VIEWS.dashboard=async function(){
+  const d=await api('/customers/'+STATE.customerId+'/dashboard');
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph"><h1>Email Security Hub</h1><p>${STATE._cust.name} · scored by the live pipeline</p></div>`));
+  v.appendChild(el(`<div class="stats">
+    ${stat('Processed',d.processed)}${stat('Clean',d.clean)}${stat('Non-Clean',d.nonClean)}
+    ${stat('Threats',d.threats,'var(--danger)')}${stat('Remediated',d.remediated,'var(--violet)')}</div>`));
+  const card=el('<div class="card"><div class="card-h"><h3>Breakdown of non-clean emails by verdict</h3></div></div>');
+  const brk=el('<div class="brk"></div>');
+  const entries=Object.entries(d.breakdown).sort((a,b)=>b[1]-a[1]);const max=Math.max(...entries.map(e=>e[1]),1);
+  if(!entries.length)brk.appendChild(el('<div style="color:var(--faint);font-size:13px">No non-clean mail scored yet.</div>'));
+  entries.forEach(([vk,ct])=>{const pct=Math.round(ct/d.nonClean*100);
+    brk.appendChild(el(`<div class="r"><div style="font-size:13px">${VERDICT_LABEL[vk]}</div><div class="bar"><span style="width:${Math.max(3,ct/max*100)}%;background:${VERDICT_BAR[vk]}"></span></div><div class="vl">${pct<1?'<1':pct}% (${ct})</div></div>`));});
+  card.appendChild(brk);v.appendChild(card);
+  return v;
+};
+function stat(l,v,color){return `<div class="s"><div class="l">${l}</div><div class="v" ${color?`style="color:${color}"`:''}>${Number(v).toLocaleString()}</div></div>`;}
+
+VIEWS.tracker=async function(){return trackerNode();};
+async function trackerNode(){
+  const qs=new URLSearchParams({page:STATE.page,from:STATE.filterFrom,to:STATE.filterTo,direction:STATE.filterDir,status:STATE.filterStatus,verdict:STATE.filterVerdict,q:STATE.filterText});
+  const data=await api(`/customers/${STATE.customerId}/messages?${qs}`);
+  const v=el('<div></div>');
+  const head=el(`<div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between"><div><h1>Live Email Tracker</h1><p>${STATE._cust.name} · inbound &amp; outbound, scored in real time</p></div></div>`);
+  const scan=el('<button class="btn teal sm">↻ Scan mail</button>');
+  scan.onclick=async()=>{scan.textContent='Scanning…';scan.disabled=true;try{const r=await api('/customers/'+STATE.customerId+'/scan-mail',{method:'POST'});toast('Scanned '+r.mailboxes+' mailbox(es), '+r.scored+' new message(s)');refresh();}catch(e){toast('Scan failed: '+e.message);scan.textContent='↻ Scan mail';scan.disabled=false;}};
+  head.appendChild(scan);
+  v.appendChild(head);
+  const card=el('<div class="card"></div>');
+  const filt=el(`<div class="filters">
+    <input id="ffrom" placeholder="From" value="${STATE.filterFrom}" style="min-width:150px">
+    <input id="fto" placeholder="To" value="${STATE.filterTo}" style="min-width:150px">
+    <select id="fdir"><option value="">All mail</option><option value="inbound" ${STATE.filterDir==='inbound'?'selected':''}>Inbound</option><option value="outbound" ${STATE.filterDir==='outbound'?'selected':''}>Outbound</option><option value="internal" ${STATE.filterDir==='internal'?'selected':''}>Internal</option></select>
+    <select id="fstat"><option value="">Any status</option>${Object.entries(DISP_LABEL).map(([k,l])=>`<option value="${k}" ${STATE.filterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
+    <select id="fverd"><option value="">All verdicts</option>${Object.entries(VERDICT_LABEL).map(([k,l])=>`<option value="${k}" ${STATE.filterVerdict===k?'selected':''}>${l}</option>`).join('')}</select>
+  </div>`);
+  let deb;
+  const onText=(id,key)=>{filt.querySelector(id).oninput=e=>{clearTimeout(deb);deb=setTimeout(()=>{STATE[key]=e.target.value;STATE.page=0;refresh();},300);};};
+  onText('#ffrom','filterFrom');onText('#fto','filterTo');
+  filt.querySelector('#fdir').onchange=e=>{STATE.filterDir=e.target.value;STATE.page=0;refresh();};
+  filt.querySelector('#fstat').onchange=e=>{STATE.filterStatus=e.target.value;STATE.page=0;refresh();};
+  filt.querySelector('#fverd').onchange=e=>{STATE.filterVerdict=e.target.value;STATE.page=0;refresh();};
+  card.appendChild(filt);
+  const tbl=el(`<table><thead><tr><th>Date &amp; Time</th><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th>Status</th><th>Service</th><th>Source</th><th></th></tr></thead><tbody></tbody></table>`);
+  const tb=tbl.querySelector('tbody');
+  if(!data.rows.length)tb.appendChild(el('<tr><td colspan="9" style="padding:36px;text-align:center;color:var(--faint)">No messages match.</td></tr>'));
+  data.rows.forEach(m=>{
+    const dt=new Date(m.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const srcLabel=m.source==='internal'?'Internal':'External';
+    const row=el(`<tr class="ck"><td class="mono" style="color:var(--muted);white-space:nowrap">${dt}</td>
+      <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.to}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
+      <td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td>
+      <td><span class="pill ${DISP_CLS[m.status]}">${DISP_LABEL[m.status]}</span></td>
+      <td style="color:var(--muted)"><span class="pill p-muted" style="font-weight:500">${m.service||'—'}</span></td>
+      <td style="color:var(--muted)">${srcLabel}</td>
+      <td><button class="btn sm">View</button></td></tr>`);
+    row.onclick=()=>openMessage(m.id);
+    tb.appendChild(row);
+  });
+  card.appendChild(tbl);
+  const pager=el(`<div class="pager"><span>${data.total.toLocaleString()} messages</span><div style="flex:1"></div>
+    <button id="pp" ${STATE.page===0?'disabled':''}>‹</button><span class="mono">${STATE.page+1}/${data.pages}</span><button id="pn" ${STATE.page>=data.pages-1?'disabled':''}>›</button></div>`);
+  pager.querySelector('#pp').onclick=()=>{STATE.page--;refresh();};pager.querySelector('#pn').onclick=()=>{STATE.page++;refresh();};
+  card.appendChild(pager);
+  v.appendChild(card);
+  return v;
+}
+async function refresh(){const host=document.getElementById('view');host.innerHTML='<div class="loading"><div class="spin"></div>Loading…</div>';host.innerHTML='';host.appendChild(await trackerNode());}
+
+// Fetch the real analysis (signals come from the actual scorers) and show it.
+async function openMessage(id){
+  let d;try{d=await api('/customers/'+STATE.customerId+'/messages/'+id);}catch(e){toast('Could not load message');return;}
+  const m=d.message,a=d.analysis;
+  const toneCls={spam:'p-warn',phishing:'p-danger',malware:'p-danger',impersonation:'p-danger',policy_infomail:'p-info',policy_geo:'p-info'};
+  const sigs=(a.signals||[]).map(s=>`<div class="sig"><div class="ic ${toneCls[s.category]||'p-muted'}">!</div><div><b style="font-weight:600;display:block">${s.detail}</b><span style="color:var(--muted);font-size:12px">${s.code}</span></div><div class="w">+${s.weight}</div></div>`).join('');
+  const modal=el(`<div class="modal"><div class="modal-h"><span class="pill ${VERDICT_CLS[a.verdict]}">${d.verdictLabel}</span><h2>${m.subject}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b">
+    <div class="kv" style="margin-bottom:18px">
+      <div class="k">From</div><div>${m.fromDisplay} &lt;${m.fromAddress}&gt;</div>
+      <div class="k">To</div><div>${m.to}</div>
+      <div class="k">Received</div><div class="mono">${new Date(m.receivedAt).toLocaleString()}</div>
+      <div class="k">Auth</div><div class="mono">SPF ${m.auth.spf} · DKIM ${m.auth.dkim} · DMARC ${m.auth.dmarc}</div>
+      <div class="k">Disposition</div><div><span class="pill ${DISP_CLS[a.disposition]}">${DISP_LABEL[a.disposition]}</span></div>
+      <div class="k">Confidence</div><div class="mono">${Math.round(a.confidence*100)}%</div>
+    </div>
+    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px">Why BreakPhish flagged this — ${(a.signals||[]).length} signal(s) from the scorers</div>
+    <div>${sigs||'<div style="color:var(--faint);font-size:13px;padding:8px 0">No risk signals — delivered clean.</div>'}</div>
+    ${a.verdict!=='clean'?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn sm" id="rel">Release to inbox</button><button class="btn sm">Report false positive</button></div>`:''}
+  </div></div>`);
+  showModal(modal);
+  const rel=modal.querySelector('#rel');if(rel)rel.onclick=async()=>{await api('/customers/'+STATE.customerId+'/messages/'+id+'/release',{method:'POST'});closeModal();toast('Release requested');};
+}
+
+VIEWS.quarantine=async function(){
+  const data=await api('/customers/'+STATE.customerId+'/quarantine');
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph"><h1>Quarantine</h1><p>${data.total} held or remediated messages</p></div>`));
+  const card=el('<div class="card"></div>');
+  const tbl=el(`<table><thead><tr><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th>Action</th></tr></thead><tbody></tbody></table>`);
+  const tb=tbl.querySelector('tbody');
+  data.rows.slice(0,25).forEach(m=>{
+    const row=el(`<tr><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td><td style="color:var(--muted)">${m.to}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td><td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td><td><button class="btn sm">Release</button></td></tr>`);
+    row.querySelector('button').onclick=async()=>{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/release',{method:'POST'});toast('Release requested');};
+    tb.appendChild(row);
+  });
+  card.appendChild(tbl);v.appendChild(card);
+  return v;
+};
+VIEWS.users=async function(){
+  const data=await api('/customers/'+STATE.customerId+'/users');
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph"><h1>Users</h1><p>${data.total} mailboxes · synced from Microsoft 365</p></div>`));
+  const card=el('<div class="card"></div>');
+  const tbl=el(`<table><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Status</th></tr></thead><tbody></tbody></table>`);
+  const tb=tbl.querySelector('tbody');
+  data.rows.forEach(u=>tb.appendChild(el(`<tr><td style="font-weight:600">${u.name}</td><td style="color:var(--muted)">${u.email}</td><td>${u.department||'—'}</td><td><span class="pill ${u.enabled?'p-ok':'p-muted'}"><span class="d" style="background:${u.enabled?'var(--ok)':'var(--faint)'}"></span>${u.enabled?'Active':'Disabled'}</span></td></tr>`)));
+  if(!data.rows.length)tb.appendChild(el('<tr><td colspan="4" style="padding:36px;text-align:center;color:var(--faint)">No synced users.</td></tr>'));
+  card.appendChild(tbl);v.appendChild(card);
+  return v;
+};
+VIEWS.policy=async function(){
+  const {policy}=await api('/customers/'+STATE.customerId+'/policy');
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph"><h1>Policy</h1><p>Verdict handling for ${STATE._cust.name}</p></div>`));
+  const card=el('<div class="card"><div class="card-h"><h3>Verdict → disposition</h3></div></div>');
+  const body=el('<div style="padding:6px 18px 14px"></div>');
+  Object.entries(policy).forEach(([vk,disp])=>{
+    body.appendChild(el(`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line2)"><span class="pill ${VERDICT_CLS[vk]}">${VERDICT_LABEL[vk]}</span><div style="flex:1"></div><span class="pill ${DISP_CLS[disp]}">${DISP_LABEL[disp]}</span></div>`));
+  });
+  card.appendChild(body);v.appendChild(card);
+  return v;
+};
+
+VIEWS.settings=async function(){
+  const [health,ver]=await Promise.all([api('/settings/health'),api('/settings/version')]);
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph"><h1>Settings</h1><p>Server health &amp; build · partner only</p></div>`));
+  const g=el('<div class="grid2"></div>');
+
+  // Health card
+  const up=health.uptimeSec, upStr=up<3600?`${Math.floor(up/60)}m`:`${Math.floor(up/3600)}h ${Math.floor((up%3600)/60)}m`;
+  const hc=el(`<div class="card"><div class="card-h"><h3>Server health</h3><span class="pill p-ok" style="margin-left:auto"><span class="d" style="background:var(--ok)"></span>${health.status==='ok'?'Healthy':'Degraded'}</span></div></div>`);
+  const hb=el('<div style="padding:6px 18px 14px"></div>');
+  const row=(k,val)=>`<div style="display:flex;padding:9px 0;border-bottom:1px solid var(--line2)"><div style="color:var(--muted);width:160px">${k}</div><div class="mono" style="flex:1">${val}</div></div>`;
+  hb.innerHTML=
+    row('Uptime',upStr)+
+    row('Node',health.node)+
+    row('Mode',`directory=${health.mode.directory} · auth=${health.mode.auth}`)+
+    row('Connected tenants',`${health.data.connectedTenants} / ${health.data.customers}`)+
+    row('Synced users',health.data.syncedUsers)+
+    row('Scored messages',health.data.scoredMessages)+
+    row('Persistence',health.data.persistence)+
+    row('Memory (RSS)',health.memoryMb.rss+' MB');
+  hc.appendChild(hb);g.appendChild(hc);
+
+  // Version / update card
+  const vc=el(`<div class="card"><div class="card-h"><h3>Build &amp; updates</h3></div></div>`);
+  const vb=el('<div style="padding:6px 18px 16px"></div>');
+  vb.innerHTML=
+    row('Version',ver.version)+
+    row('Branch',ver.branch)+
+    row('Commit',ver.commit)+
+    row('Committed',ver.committedAt?new Date(ver.committedAt).toLocaleString():'—');
+  const upd=el('<div style="padding:14px 0 2px"></div>');
+  const btn=el('<button class="btn sm">Check for updates</button>');
+  const result=el('<div style="margin-top:12px;font-size:13px;color:var(--muted)"></div>');
+  btn.onclick=async()=>{btn.textContent='Checking…';btn.disabled=true;
+    try{const u=await api('/settings/update-check');
+      if(u.upToDate===null)result.innerHTML=`<span class="pill p-muted">Update check unavailable</span> — ${u.note||'set GITHUB_REPO to enable'}.`;
+      else if(u.upToDate===true)result.innerHTML=`<span class="pill p-ok">Up to date</span> — running the latest commit <span class="mono">${u.current}</span>.`;
+      else result.innerHTML=`<span class="pill p-warn">Update available</span> — you're on <span class="mono">${u.current}</span>, latest is <span class="mono">${u.latestRemote}</span>.<br><span style="color:var(--faint)">To update, on the droplet run: <span class="mono">./deploy.sh</span> (or <span class="mono">git pull &amp;&amp; docker compose up -d --build</span>)</span>`;
+    }catch(e){result.textContent='Update check failed: '+e.message;}
+    btn.textContent='Check for updates';btn.disabled=false;};
+  upd.appendChild(btn);vb.appendChild(upd);vb.appendChild(result);
+  vc.appendChild(vb);g.appendChild(vc);
+
+  v.appendChild(g);
+  v.appendChild(el('<div class="card p" style="margin-top:16px;color:var(--muted);font-size:13px"><b style="color:var(--txt)">Note:</b> updates are applied from the terminal by design — there is no in-app deploy button, to avoid exposing code execution over the web. This page only reports status.</div>'));
+  return v;
+};
+
+/* ---- wizard (create via API) ---- */
+const WIZ={step:0,name:'',domain:'',mailboxes:'',products:['email_security']};
+function openWizard(){Object.assign(WIZ,{step:0,name:'',domain:'',mailboxes:'',products:['email_security']});renderWizard();}
+function renderWizard(){
+  const modal=el(`<div class="modal"><div class="modal-h"><h2>New customer</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="wb"></div></div>`);
+  showModal(modal);const b=modal.querySelector('#wb');
+  b.appendChild(el(`<div class="field"><label>Company name</label><input id="wn" value="${WIZ.name}" placeholder="Acme Corporation"></div>`));
+  b.appendChild(el(`<div class="field"><label>Primary domain</label><input id="wd" value="${WIZ.domain}" placeholder="acme.test"></div>`));
+  b.appendChild(el(`<div class="field"><label>Mailboxes</label><input id="wm" value="${WIZ.mailboxes}" placeholder="120"></div>`));
+  b.appendChild(el(`<div class="field"><label>Service</label><select><option>BreakPhish 365 (API)</option><option disabled>BreakPhish Gateway — coming soon</option><option disabled>BreakPhish Unified — coming soon</option></select></div>`));
+  const foot=el(`<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="wc">Create customer</button></div>`);
+  foot.querySelector('#wc').onclick=async()=>{
+    const name=b.querySelector('#wn').value,domain=b.querySelector('#wd').value,mailboxes=b.querySelector('#wm').value;
+    if(!name||!domain){toast('Enter name and domain');return;}
+    try{await api('/customers',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name,domain,products:['email_security'],integrationModel:'api',mailboxes})});
+      closeModal();toast('Customer created — awaiting consent');go('customers');}
+    catch(e){toast(e.message);}
+  };
+  b.appendChild(foot);
+}
+function showModal(n){const h=document.getElementById('modalHost');h.innerHTML='';h.appendChild(n);document.getElementById('scrim').classList.add('open');}
+function closeModal(){document.getElementById('scrim').classList.remove('open');}
+
+/* init */
+boot();
+</script>
+</body>
+</html>
