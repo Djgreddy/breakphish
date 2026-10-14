@@ -131,7 +131,7 @@ const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p
 const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated'};
 const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
 
-const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',page:0,session:null};
+const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',filterRange:'all',dateFrom:'',dateTo:'',page:0,session:null};
 
 /* ---------- auth ---------- */
 async function boot(){
@@ -217,7 +217,7 @@ function chrome(){
   renderNav();
 }
 async function go(view){
-  STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';
+  STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';STATE.filterRange='all';
   document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Live Email Tracker',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Live Email Tracker','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs'})[view]||view;
   chrome();
   const host=document.getElementById('view');host.innerHTML='<div class="loading"><div class="spin"></div>Loading live data…</div>';
@@ -312,7 +312,7 @@ function stat(l,v,color){return `<div class="s"><div class="l">${l}</div><div cl
 
 VIEWS.tracker=async function(){return trackerNode();};
 async function trackerNode(){
-  const qs=new URLSearchParams({page:STATE.page,from:STATE.filterFrom,to:STATE.filterTo,direction:STATE.filterDir,status:STATE.filterStatus,verdict:STATE.filterVerdict,q:STATE.filterText});
+  const qs=new URLSearchParams({page:STATE.page,from:STATE.filterFrom,to:STATE.filterTo,direction:STATE.filterDir,status:STATE.filterStatus,verdict:STATE.filterVerdict,q:STATE.filterText,range:STATE.filterRange,dfrom:STATE.dateFrom,dto:STATE.dateTo});
   const data=await api(`/customers/${STATE.customerId}/messages?${qs}`);
   const v=el('<div></div>');
   const head=el(`<div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between"><div><h1>Live Email Tracker</h1><p>${STATE._cust.name} · inbound &amp; outbound, scored in real time</p></div></div>`);
@@ -321,9 +321,13 @@ async function trackerNode(){
   head.appendChild(scan);
   v.appendChild(head);
   const card=el('<div class="card"></div>');
+  const RANGE_OPTS=[['all','All time'],['today','Today'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']];
   const filt=el(`<div class="filters">
-    <input id="ffrom" placeholder="From" value="${STATE.filterFrom}" style="min-width:150px">
-    <input id="fto" placeholder="To" value="${STATE.filterTo}" style="min-width:150px">
+    <input id="ffrom" placeholder="From" value="${STATE.filterFrom}" style="min-width:140px">
+    <input id="fto" placeholder="To" value="${STATE.filterTo}" style="min-width:140px">
+    <select id="frange">${RANGE_OPTS.map(([v2,l])=>`<option value="${v2}" ${STATE.filterRange===v2?'selected':''}>${l}</option>`).join('')}</select>
+    <input id="fcfrom" type="date" style="${STATE.filterRange==='custom'?'':'display:none'}">
+    <input id="fcto" type="date" style="${STATE.filterRange==='custom'?'':'display:none'}">
     <select id="fdir"><option value="">All mail</option><option value="inbound" ${STATE.filterDir==='inbound'?'selected':''}>Inbound</option><option value="outbound" ${STATE.filterDir==='outbound'?'selected':''}>Outbound</option><option value="internal" ${STATE.filterDir==='internal'?'selected':''}>Internal</option></select>
     <select id="fstat"><option value="">Any status</option>${Object.entries(DISP_LABEL).map(([k,l])=>`<option value="${k}" ${STATE.filterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
     <select id="fverd"><option value="">All verdicts</option>${Object.entries(VERDICT_LABEL).map(([k,l])=>`<option value="${k}" ${STATE.filterVerdict===k?'selected':''}>${l}</option>`).join('')}</select>
@@ -331,6 +335,9 @@ async function trackerNode(){
   let deb;
   const onText=(id,key)=>{filt.querySelector(id).oninput=e=>{clearTimeout(deb);deb=setTimeout(()=>{STATE[key]=e.target.value;STATE.page=0;refresh();},300);};};
   onText('#ffrom','filterFrom');onText('#fto','filterTo');
+  filt.querySelector('#frange').onchange=e=>{STATE.filterRange=e.target.value;STATE.page=0;refresh();};
+  filt.querySelector('#fcfrom').onchange=e=>{STATE.dateFrom=e.target.value;STATE.filterRange='custom';STATE.page=0;refresh();};
+  filt.querySelector('#fcto').onchange=e=>{STATE.dateTo=e.target.value;STATE.filterRange='custom';STATE.page=0;refresh();};
   filt.querySelector('#fdir').onchange=e=>{STATE.filterDir=e.target.value;STATE.page=0;refresh();};
   filt.querySelector('#fstat').onchange=e=>{STATE.filterStatus=e.target.value;STATE.page=0;refresh();};
   filt.querySelector('#fverd').onchange=e=>{STATE.filterVerdict=e.target.value;STATE.page=0;refresh();};
@@ -367,23 +374,46 @@ async function refresh(){const host=document.getElementById('view');host.innerHT
 async function openMessage(id){
   let d;try{d=await api('/customers/'+STATE.customerId+'/messages/'+id);}catch(e){toast('Could not load message');return;}
   const m=d.message,a=d.analysis;
+  const kv=(k,v)=>`<div style="display:grid;grid-template-columns:150px 1fr;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line2)"><div style="color:var(--muted);text-align:right">${k}</div><div>${v}</div></div>`;
+  const authPill=x=>x==='pass'?'<span class="pill p-ok">Pass</span>':x==='fail'?'<span class="pill p-danger">Fail</span>':'<span class="pill p-warn">None</span>';
+  const spamScore=(a.signals||[]).reduce((s,x)=>s+(x.weight||0),0);
   const toneCls={spam:'p-warn',phishing:'p-danger',malware:'p-danger',impersonation:'p-danger',policy_infomail:'p-info',policy_geo:'p-info'};
-  const sigs=(a.signals||[]).map(s=>`<div class="sig"><div class="ic ${toneCls[s.category]||'p-muted'}">!</div><div><b style="font-weight:600;display:block">${s.detail}</b><span style="color:var(--muted);font-size:12px">${s.code}</span></div><div class="w">+${s.weight}</div></div>`).join('');
-  const modal=el(`<div class="modal"><div class="modal-h"><span class="pill ${VERDICT_CLS[a.verdict]}">${d.verdictLabel}</span><h2>${m.subject}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b">
-    <div class="kv" style="margin-bottom:18px">
-      <div class="k">From</div><div>${m.fromDisplay} &lt;${m.fromAddress}&gt;</div>
-      <div class="k">To</div><div>${m.to}</div>
-      <div class="k">Received</div><div class="mono">${new Date(m.receivedAt).toLocaleString()}</div>
-      <div class="k">Auth</div><div class="mono">SPF ${m.auth.spf} · DKIM ${m.auth.dkim} · DMARC ${m.auth.dmarc}</div>
-      <div class="k">Disposition</div><div><span class="pill ${DISP_CLS[a.disposition]}">${DISP_LABEL[a.disposition]}</span></div>
-      <div class="k">Confidence</div><div class="mono">${Math.round(a.confidence*100)}%</div>
-    </div>
-    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px">Why BreakPhish flagged this — ${(a.signals||[]).length} signal(s) from the scorers</div>
-    <div>${sigs||'<div style="color:var(--faint);font-size:13px;padding:8px 0">No risk signals — delivered clean.</div>'}</div>
-    ${a.verdict!=='clean'?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn sm" id="rel">Release to inbox</button><button class="btn sm">Report false positive</button></div>`:''}
-  </div></div>`);
+  const TABS={
+    'Email Details':()=>`<div style="border:1px solid var(--line2);border-radius:10px;overflow:hidden">
+      ${kv('Header From',`${m.fromDisplay} &lt;${m.fromAddress}&gt;`)}${kv('To',m.to)}${kv('Reply-To',m.replyTo||'—')}${kv('Subject',m.subject)}
+      ${kv('Received At',new Date(m.receivedAt).toLocaleString())}${kv('Source',m.source==='internal'?'Internal':'External')}
+      ${kv('Attachments',(m.attachments&&m.attachments.length)?m.attachments.map(x=>x.filename).join(', '):'—')}
+      ${kv('Direction',m.direction)}${kv('Message ID',`<span class="mono" style="font-size:12px">${m.id}</span>`)}
+      ${kv('Service',d.message.service||'BreakPhish 365')}${kv('Status',`<span class="pill ${DISP_CLS[a.disposition]}">${DISP_LABEL[a.disposition]}</span> ${m.to}`)}</div>`,
+    'Analysis':()=>`<div style="border:1px solid var(--line2);border-radius:10px;overflow:hidden">
+      ${kv('Status',`<span class="pill ${DISP_CLS[a.disposition]}">${DISP_LABEL[a.disposition]}</span>`)}
+      ${kv('Verdict',`<span class="pill ${VERDICT_CLS[a.verdict]}">${d.verdictLabel}</span>`)}
+      ${kv('SPF',authPill(m.auth.spf))}${kv('DKIM',authPill(m.auth.dkim))}${kv('DMARC',authPill(m.auth.dmarc))}
+      ${kv('Spam Score',`<span class="mono">${(spamScore/14).toFixed(2)}</span>`)}
+      ${kv('Known Contact',m.firstTimeSender?'No':'Yes')}
+      ${kv('Signals',(a.signals||[]).length?(a.signals.map(s=>`<div class="sig" style="padding:6px 0"><div class="ic ${toneCls[s.category]||'p-muted'}">!</div><div class="st"><b>${s.detail}</b><span style="color:var(--muted);font-size:12px">${s.code}</span></div><div class="w">+${s.weight}</div></div>`).join('')):'No risk signals.')}</div>`,
+    'Preview':()=>`<div style="padding:16px;color:var(--warn);font-size:13px">No preview available. Preview is only shown for quarantined mail; clean and delivered mail content is not stored.</div>`,
+    'Event Log':()=>`<div style="border:1px solid var(--line2);border-radius:10px;overflow:hidden"><div style="display:grid;grid-template-columns:200px 1fr;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line2);font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em"><div>Timestamp</div><div>Event</div></div>${(d.events||[]).map(e=>`<div style="display:grid;grid-template-columns:200px 1fr;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line2)"><div class="mono" style="color:var(--muted)">${new Date(e.at).toLocaleString()}</div><div><span style="color:var(--ok)">●</span> ${e.event}</div></div>`).join('')}</div>`,
+  };
+  let tab='Email Details';
+  const modal=el(`<div class="modal" style="max-width:760px"><div class="modal-h"><h2 style="flex:1">View</h2><button class="modal-x" onclick="closeModal()">✕</button></div>
+    <div style="padding:0 20px"><div class="tabs" id="mtabs" style="margin:0"></div></div>
+    <div class="modal-b" id="mbody" style="max-height:60vh;overflow:auto"></div>
+    <div style="display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Close</button><div style="flex:1"></div>
+      <div style="position:relative"><button class="btn primary" id="rembtn">⧖ Remediate ▾</button></div></div></div>`);
   showModal(modal);
-  const rel=modal.querySelector('#rel');if(rel)rel.onclick=async()=>{await api('/customers/'+STATE.customerId+'/messages/'+id+'/release',{method:'POST'});closeModal();toast('Release requested');};
+  const tabsEl=modal.querySelector('#mtabs'),bodyEl=modal.querySelector('#mbody');
+  const paint=()=>{bodyEl.innerHTML=TABS[tab]();};
+  Object.keys(TABS).forEach(t=>{const bt=el(`<button class="${tab===t?'on':''}">${t}</button>`);bt.onclick=()=>{tab=t;tabsEl.querySelectorAll('button').forEach(x=>x.classList.remove('on'));bt.classList.add('on');paint();};tabsEl.appendChild(bt);});
+  paint();
+  // Remediate menu
+  modal.querySelector('#rembtn').onclick=(e)=>{e.stopPropagation();
+    const items=[['plain','Remediate'],['block_recipient','Remediate & block sender for recipient'],['block_org','Remediate & block sender for organization']];
+    const mn=el('<div></div>');mn.style.cssText='position:fixed;z-index:130;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:0 18px 44px -14px rgba(0,0,0,.5);min-width:280px';
+    items.forEach(([opt,lbl])=>{const b=el(`<button>${lbl}</button>`);b.style.cssText='display:block;width:100%;text-align:left;padding:9px 11px;border-radius:8px;font-size:13px';b.onmouseover=()=>b.style.background='var(--surface2)';b.onmouseout=()=>b.style.background='none';b.onclick=async()=>{mn.remove();try{await api('/customers/'+STATE.customerId+'/messages/'+id+'/remediate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:opt})});closeModal();toast('Remediated'+(opt!=='plain'?' & blocked sender':''));refresh&&refresh();}catch(err){toast('Failed: '+err.message);}};mn.appendChild(b);});
+    document.body.appendChild(mn);const r=e.target.getBoundingClientRect();mn.style.left=Math.max(8,r.right-280)+'px';mn.style.top=(r.top-10-(items.length*40))+'px';
+    const close=()=>{mn.remove();document.removeEventListener('click',close);};setTimeout(()=>document.addEventListener('click',close),0);
+  };
 }
 
 VIEWS.quarantine=async function(){

@@ -12,6 +12,8 @@ import { ingestBatch } from './emailsec/pipeline';
 import { emailStore } from './emailsec/store';
 import { dashboard, liveTracker } from './emailsec/reporting';
 import { ingestTenantMail } from './emailsec/mailIngest';
+import { applyDisposition } from './emailsec/mailActions';
+import { persistScored } from './db/hydrate';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
 import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf } from './auth/middleware';
 import { getSettings, saveSettings } from './settings';
@@ -273,7 +275,18 @@ export function buildApi() {
     const per = Math.min(100, Number(req.query.per ?? 15));
     const customer = getCustomer(req.params.id);
     const service = customer?.integrationModel === 'api' ? 'BreakPhish 365' : (customer?.integrationModel ?? '');
+    const range = String(req.query.range ?? 'all');
     let rows = liveTracker(req.params.id);
+    // date range
+    if (range !== 'all') {
+      const now = Date.now();
+      let from = 0, to = now;
+      if (range === 'today') { const d = new Date(); d.setHours(0,0,0,0); from = d.getTime(); }
+      else if (range === '7d') from = now - 7 * 864e5;
+      else if (range === '30d') from = now - 30 * 864e5;
+      else if (range === 'custom') { from = Date.parse(String(req.query.dfrom ?? '')) || 0; to = (Date.parse(String(req.query.dto ?? '')) + 864e5) || now; }
+      rows = rows.filter(r => { const t = Date.parse(r.at); return t >= from && t <= to; });
+    }
     if (verdict) rows = rows.filter(r => r.verdict === verdict);
     if (direction) rows = rows.filter(r => r.direction === direction);
     if (status) rows = rows.filter(r => r.status === status);
@@ -289,7 +302,36 @@ export function buildApi() {
     const m = emailStore.messages.get(req.params.mid);
     const a = emailStore.analysisFor(req.params.mid);
     if (!m || !a) return res.status(404).json({ error: 'not found' });
-    res.json({ message: m, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict] });
+    // Lightweight event log derived from what we know.
+    const events = [
+      { at: m.receivedAt, event: 'Content analysis' },
+      { at: m.receivedAt, event: a.disposition === 'remediated' ? 'Remediated' : a.disposition === 'quarantine' ? 'Quarantined' : a.disposition === 'junk' ? 'Moved to Junk' : 'Delivered' },
+    ];
+    res.json({ message: m, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events });
+  });
+
+  // Remediate a delivered message now: move it to quarantine and mark it.
+  // option: 'plain' | 'block_recipient' | 'block_org'
+  api.post('/customers/:id/messages/:mid/remediate', requireAuth, requireCustomerAccess, async (req, res) => {
+    try {
+      const id = req.params.id, mid = req.params.mid;
+      const m = emailStore.messages.get(mid); const a = emailStore.analysisFor(mid);
+      if (!m || !a) return res.status(404).json({ error: 'not found' });
+      // flip disposition to remediated + persist
+      a.disposition = 'remediated'; a.remediated = true;
+      emailStore.saveAnalysis(a);
+      await persistScored(m, a);
+      // act on the mailbox (graph mode) — find the recipient mailbox id
+      const conn = getConnection(id);
+      const user = store.usersForTenant(id).find(u => u.email.toLowerCase() === m.to.toLowerCase());
+      if (conn?.entraTenantId && user) await applyDisposition(conn.entraTenantId, user.externalId, mid, 'remediated');
+      // optional block rule
+      const option = String(req.body?.option ?? 'plain');
+      if (option === 'block_recipient' || option === 'block_org') {
+        await saveRule({ scope: option === 'block_org' ? 'partner' : id, kind: 'block', data: { sender: m.fromAddress, comment: `Blocked via remediation (${m.subject})` } });
+      }
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
 
   api.get('/customers/:id/quarantine', (req, res) => {

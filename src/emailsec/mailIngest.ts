@@ -12,6 +12,7 @@ import { store } from '../store';
 import { getConnection } from '../consent';
 import { analyze } from './pipeline';
 import { emailStore } from './store';
+import { applyDisposition } from './mailActions';
 import type { Message } from './types';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -67,7 +68,7 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
 
 // Pull the most recent inbox messages for one mailbox and score any we haven't
 // seen before. Returns how many new messages were scored.
-async function ingestFolder(tenantId: string, verifiedDomains: string[], userId: string, token: string, folder: 'inbox' | 'sentitems', top = 25): Promise<number> {
+async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, token: string, folder: 'inbox' | 'sentitems', top = 25): Promise<number> {
   const select = folder === 'sentitems'
     ? 'id,subject,from,sender,toRecipients,sentDateTime,bodyPreview,body,internetMessageHeaders'
     : 'id,subject,from,toRecipients,replyTo,receivedDateTime,bodyPreview,body,internetMessageHeaders';
@@ -83,7 +84,11 @@ async function ingestFolder(tenantId: string, verifiedDomains: string[], userId:
     // sentitems lack receivedDateTime — fall back to sentDateTime.
     if (!m.receivedDateTime && m.sentDateTime) m.receivedDateTime = m.sentDateTime;
     if (emailStore.analysisFor(m.id)) continue; // already scored — skip
-    await analyze(normalize(tenantId, verifiedDomains, m, folder));
+    const analysis = await analyze(normalize(tenantId, verifiedDomains, m, folder));
+    // Enforce: act on the real mailbox for inbound mail the policy junks/quarantines.
+    if (folder === 'inbox' && ['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
+      await applyDisposition(entraTenantId, userId, m.id, analysis.disposition);
+    }
     scored++;
   }
   return scored;
@@ -91,8 +96,8 @@ async function ingestFolder(tenantId: string, verifiedDomains: string[], userId:
 
 async function ingestMailbox(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, token: string): Promise<number> {
   let n = 0;
-  n += await ingestFolder(tenantId, verifiedDomains, userId, token, 'inbox');
-  n += await ingestFolder(tenantId, verifiedDomains, userId, token, 'sentitems');
+  n += await ingestFolder(tenantId, entraTenantId, verifiedDomains, userId, token, 'inbox');
+  n += await ingestFolder(tenantId, entraTenantId, verifiedDomains, userId, token, 'sentitems');
   return n;
 }
 
