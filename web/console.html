@@ -88,7 +88,7 @@ tbody tr.ck{cursor:pointer}tbody tr.ck:hover{background:var(--surface2)}
   <aside class="sidebar">
     <div class="brand">
       <svg class="mark" viewBox="0 0 40 40" fill="none"><path d="M20 3l14 5v9c0 9-6 15.5-14 18.5C12 32.5 6 26 6 17V8l14-5z" fill="url(#g)"/><path d="M14 20l4 4 8-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><defs><linearGradient id="g" x1="6" y1="3" x2="34" y2="35"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs></svg>
-      <div class="nm">Break<span>Phish</span></div><div class="live">● LIVE API</div>
+      <div class="nm">Break<span>Phish</span></div>
     </div>
     <nav class="menu" id="nav"></nav>
     <div class="side-foot" id="foot">Partner · reading from /api</div>
@@ -505,7 +505,13 @@ async function settingsCustomization(){
   const pick=el('<input type="file" accept="image/*" style="display:none">');
   const upBtn=el('<button class="btn sm">Upload logo</button>');upBtn.onclick=()=>pick.click();
   const rmBtn=el('<button class="btn sm" style="color:var(--danger)">Remove</button>');rmBtn.onclick=()=>{z.logoDataUrl='';paintLogo();};
-  pick.onchange=()=>{const f=pick.files[0];if(!f)return;if(f.size>1048576){toast('Logo must be under 1 MB');return;}const r=new FileReader();r.onload=()=>{z.logoDataUrl=r.result;paintLogo();};r.readAsDataURL(f);};
+  pick.onchange=()=>{const f=pick.files[0];if(!f)return;if(!f.type.startsWith('image/')){toast('Please choose an image file');return;}
+    // Downscale to max 280px wide in-browser, so any size image becomes a tiny logo.
+    const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{
+      const maxW=280, scale=Math.min(1, maxW/img.width), w=Math.round(img.width*scale), h=Math.round(img.height*scale);
+      const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);
+      z.logoDataUrl=cv.toDataURL('image/png');paintLogo();toast('Logo ready ('+Math.round(z.logoDataUrl.length/1024)+' KB) — click Save');
+    };img.onerror=()=>toast('Could not read that image');img.src=r.result;};r.readAsDataURL(f);};
   const btns=el('<div style="display:flex;flex-direction:column;gap:8px"></div>');btns.appendChild(upBtn);btns.appendChild(rmBtn);
   prev.appendChild(box);prev.appendChild(btns);prev.appendChild(pick);
   logoRow.appendChild(prev);
@@ -518,13 +524,23 @@ async function settingsCustomization(){
   return c;
 }
 
-// Apply the current scope's logo + app name to the sidebar (best-effort).
+const DEFAULT_BRAND='<svg class="mark" viewBox="0 0 40 40" fill="none"><path d="M20 3l14 5v9c0 9-6 15.5-14 18.5C12 32.5 6 26 6 17V8l14-5z" fill="url(#g)"/><path d="M14 20l4 4 8-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><defs><linearGradient id="g" x1="6" y1="3" x2="34" y2="35"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs></svg><div class="nm">Break<span>Phish</span></div>';
+// Apply the current scope's logo + app name to the sidebar as a proper lockup.
 async function applyBranding(){
+  const brand=document.querySelector('.brand');if(!brand)return;
   try{const r=await api('/settings/config');const z=r.settings.customization;
-    const nm=document.querySelector('.brand .nm');const mark=document.querySelector('.brand .mark');
-    if(z.active&&z.appName)nm.textContent=z.appName;
-    if(z.active&&z.logoDataUrl&&mark){mark.outerHTML=`<img class="mark" src="${z.logoDataUrl}" style="width:32px;height:32px;object-fit:contain;border-radius:8px">`;}
-  }catch(e){}
+    if(z.active&&z.logoDataUrl){
+      // Full-width logo on its background color, app name beneath — like a real brand lockup.
+      brand.style.flexDirection='column';brand.style.alignItems='stretch';brand.style.gap='10px';
+      brand.innerHTML=
+        `<div style="background:${z.backgroundColor||'#1b1240'};border-radius:10px;padding:10px 12px;display:grid;place-items:center;min-height:52px">`+
+        `<img src="${z.logoDataUrl}" style="max-width:100%;max-height:52px;object-fit:contain"></div>`+
+        (z.appName?`<div style="font-weight:700;font-size:14px;color:#fff;text-align:center;letter-spacing:-.01em">${z.appName}</div>`:'');
+    } else {
+      brand.style.flexDirection='';brand.style.alignItems='';brand.style.gap='';
+      brand.innerHTML=DEFAULT_BRAND;
+    }
+  }catch(e){ brand.innerHTML=DEFAULT_BRAND; }
 }
 async function settingsBanners(){
   const c=el('<div class="card p"></div>');
