@@ -13,6 +13,7 @@ import { emailStore } from './emailsec/store';
 import { dashboard, liveTracker } from './emailsec/reporting';
 import { ingestTenantMail } from './emailsec/mailIngest';
 import { applyDisposition } from './emailsec/mailActions';
+import { subscribeTenant, listSubscriptions } from './emailsec/subscriptions';
 import { persistScored } from './db/hydrate';
 import { dbEnabled } from './db/db';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
@@ -65,6 +66,7 @@ function customerSummary(c: Customer) {
     orderedAt: c.orderedAt, flags: c.flags, integrationModel: c.integrationModel,
     connection: conn ? { status: conn.status, verifiedDomains: conn.verifiedDomains ?? [] } : { status: 'not_connected', verifiedDomains: [] },
     syncedUsers: store.usersForTenant(c.id).length,
+    realtime: listSubscriptions().filter(s => s.customerId === c.id).length,
     threats: d ? d.threats : 0, processed: d ? d.processed : 0,
   };
 }
@@ -238,6 +240,7 @@ export function buildApi() {
       let scored = 0;
       if (getCustomer(id)!.products.includes('email_security')) {
         const r = await ingestTenantMail(id); scored = r.scored;
+        try { await subscribeTenant(id); } catch (e) { console.error('[resync] subscribe failed', (e as Error).message); }
       }
       res.json({ ok: true, users: sync.users, groups: sync.groups, scored });
     } catch (e) {

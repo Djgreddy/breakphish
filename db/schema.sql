@@ -204,3 +204,15 @@ create index if not exists policy_rules_scope_idx on policy_rules(scope, kind);
 
 -- stable RFC message id (survives folder moves; Graph item id does not)
 alter table messages add column if not exists internet_message_id text;
+
+-- ------- Graph change-notification subscriptions (real-time ingestion) -------
+create table if not exists graph_subscriptions (
+  id           text primary key,          -- Graph subscription id
+  customer_id  text not null,
+  user_id      text not null,             -- mailbox (Entra object id)
+  resource     text not null,
+  client_state text not null,
+  expiration   timestamptz not null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists graph_subscriptions_cust_idx on graph_subscriptions(customer_id);

@@ -8,6 +8,7 @@ import { store } from './store';
 import { syncTenant } from './directory/syncService';
 import { getCustomer, markCustomerConnected } from './onboarding';
 import { ingestTenantMail } from './emailsec/mailIngest';
+import { subscribeTenant } from './emailsec/subscriptions';
 
 // After a real admin grants consent, Microsoft gives us the customer's true
 // tenant id and verified domains. Point the tenant at them and run the first
@@ -31,6 +32,9 @@ async function finishRealConnection(customerId: string): Promise<void> {
   if (customer?.products.includes('email_security')) {
     try { await ingestTenantMail(customerId); }
     catch (e) { console.error('[connect] initial mail scan failed:', (e as Error).message); }
+    // Turn on real-time: subscribe every mailbox to Graph change notifications.
+    try { await subscribeTenant(customerId); }
+    catch (e) { console.error('[connect] subscribe failed:', (e as Error).message); }
   }
 }
 

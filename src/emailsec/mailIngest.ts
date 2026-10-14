@@ -102,6 +102,25 @@ async function ingestMailbox(tenantId: string, entraTenantId: string, verifiedDo
   return n;
 }
 
+// Fetch, score, and (if needed) act on ONE message — used by the webhook when a
+// real-time notification arrives. Returns the disposition, or null if skipped.
+export async function ingestOneMessage(tenantId: string, entraTenantId: string, userId: string, messageId: string): Promise<string | null> {
+  if (emailStore.analysisFor(messageId)) return null; // already scored
+  const t = store.getTenant(tenantId);
+  if (!t) return null;
+  const token = await appToken(entraTenantId);
+  const url = `${GRAPH}/users/${encodeURIComponent(userId)}/messages/${messageId}` +
+    `?$select=id,internetMessageId,subject,from,toRecipients,replyTo,receivedDateTime,bodyPreview,body,internetMessageHeaders&$expand=attachments($select=name,contentType)`;
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) { console.error(`[webhook] fetch message failed ${res.status}`); return null; }
+  const m = await res.json();
+  const analysis = await analyze(normalize(tenantId, t.verifiedDomains, m, 'inbox'));
+  if (['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
+    await applyDisposition(entraTenantId, userId, { graphId: m.id, internetMessageId: m.internetMessageId }, analysis.disposition);
+  }
+  return analysis.disposition;
+}
+
 // Ingest inbox mail for every synced user of a connected tenant.
 export async function ingestTenantMail(tenantId: string): Promise<{ mailboxes: number; scored: number }> {
   const conn = getConnection(tenantId);

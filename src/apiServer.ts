@@ -15,6 +15,8 @@ import { hydrateConnections } from './consent';
 import { hydrateDirectory, hydrateEmail } from './db/hydrate';
 import { hydrateSettings } from './settings';
 import { hydratePolicy } from './policy';
+import { buildWebhookApp } from './webhooks';
+import { hydrateSubscriptions, renewDue } from './emailsec/subscriptions';
 import { buildApi, connectAndSeed } from './api';
 import { buildConsentApp } from './consentServer';
 import { buildAuthApp } from './auth/authServer';
@@ -65,7 +67,8 @@ async function main() {
       const em = await hydrateEmail();
       const st = await hydrateSettings();
       const pol = await hydratePolicy();
-      console.log(`[db] hydrated ${c} customers, ${n} connections, ${dir.users} users, ${dir.groups} groups, ${em.messages} messages, ${st} settings, ${pol.templates} policy templates from Postgres`);
+      const subN = await hydrateSubscriptions();
+      console.log(`[db] hydrated ${c} customers, ${n} connections, ${dir.users} users, ${dir.groups} groups, ${em.messages} messages, ${st} settings, ${pol.templates} policy templates, ${subN} subscriptions from Postgres`);
     } catch (e) {
       console.error('[db] migration/hydrate failed — check DATABASE_URL:', (e as Error).message);
     }
@@ -79,9 +82,15 @@ async function main() {
   else console.log(`[db] ${listCustomers().length} customers present — skipping demo seed`);
 
   const app = express();
+  app.use(buildWebhookApp());                // /webhooks/graph (public, clientState-validated)
   app.use(buildAuthApp());                   // /auth/* (public)
   app.use('/api', buildApi());               // protected by session middleware
   app.use(buildConsentApp());               // /onboarding/consent/*
+
+  // Keep Graph subscriptions alive (renew those nearing expiry) every 30 min.
+  if (config.directoryProvider === 'graph') {
+    setInterval(() => { renewDue().then(n => { if (n) console.log(`[subs] renewed ${n} subscription(s)`); }).catch(() => {}); }, 30 * 60000);
+  }
   app.get('/', (_req, res) => res.sendFile(join(__dirname, '..', 'web', 'console.html')));
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 

@@ -420,11 +420,11 @@ async function openMessage(id){
   }
   const act=async(path,option,msg)=>{try{await api('/customers/'+STATE.customerId+'/messages/'+id+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option})});closeModal();toast(msg);refresh&&refresh();}catch(e){toast('Failed: '+e.message);}};
   if(held){
-    foot.appendChild(splitBtn('Deliver','ok',[['Deliver',()=>act('/release','plain','Delivered to inbox')],['Deliver & allow sender for recipient',()=>act('/release','allow_recipient','Delivered & allowed sender')],['Deliver & allow sender for organization',()=>act('/release','allow_org','Delivered & allowed sender (org)')]]));
-    foot.appendChild(splitBtn('Delete','danger',[['Delete',()=>act('/delete','plain','Deleted')],['Delete & block sender for recipient',()=>act('/delete','block_recipient','Deleted & blocked sender')],['Delete & block sender for organization',()=>act('/delete','block_org','Deleted & blocked sender (org)')]]));
+    foot.appendChild(splitBtn('Deliver','ok',[['Deliver',()=>confirmAct('Deliver',m,()=>act('/release','plain','Delivered to inbox'))],['Deliver & allow sender for recipient',()=>confirmAct('Deliver',m,()=>act('/release','allow_recipient','Delivered & allowed sender'))],['Deliver & allow sender for organization',()=>confirmAct('Deliver',m,()=>act('/release','allow_org','Delivered & allowed sender (org)'))]]));
+    foot.appendChild(splitBtn('Delete','danger',[['Delete',()=>confirmAct('Delete',m,()=>act('/delete','plain','Deleted'))],['Delete & block sender for recipient',()=>confirmAct('Delete',m,()=>act('/delete','block_recipient','Deleted & blocked sender'))],['Delete & block sender for organization',()=>confirmAct('Delete',m,()=>act('/delete','block_org','Deleted & blocked sender (org)'))]]));
     const dl=el('<button class="btn sm">⤓ Download</button>');dl.onclick=()=>{window.open('/api/customers/'+STATE.customerId+'/messages/'+id+'/download','_blank');};foot.appendChild(dl);
   } else {
-    foot.appendChild(splitBtn('Remediate','primary',[['Remediate',()=>act('/remediate','plain','Remediated')],['Remediate & block sender for recipient',()=>act('/remediate','block_recipient','Remediated & blocked sender')],['Remediate & block sender for organization',()=>act('/remediate','block_org','Remediated & blocked sender (org)')]]));
+    foot.appendChild(splitBtn('Remediate','primary',[['Remediate',()=>confirmAct('Remediate',m,()=>act('/remediate','plain','Remediated'))],['Remediate & block sender for recipient',()=>confirmAct('Remediate',m,()=>act('/remediate','block_recipient','Remediated & blocked sender'))],['Remediate & block sender for organization',()=>confirmAct('Remediate',m,()=>act('/remediate','block_org','Remediated & blocked sender (org)'))]]));
   }
 }
 
@@ -440,8 +440,9 @@ VIEWS.quarantine=async function(){
     const row=el(`<tr><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td><td style="color:var(--muted)">${m.to}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td><td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td><td style="text-align:right;white-space:nowrap"></td></tr>`);
     const act=row.children[4];
     const vw=el('<button class="btn sm">View</button>');vw.onclick=()=>openMessage(m.id);act.appendChild(vw);
-    const rel=el('<button class="btn ok sm" style="margin-left:6px">Deliver</button>');rel.onclick=async()=>{try{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/release',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});toast('Delivered to inbox');go('quarantine');}catch(e){toast('Failed: '+e.message);}};act.appendChild(rel);
-    const del=el('<button class="btn danger sm" style="margin-left:6px">Delete</button>');del.onclick=async()=>{if(!confirm('Delete this message?'))return;try{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});toast('Deleted');go('quarantine');}catch(e){toast('Failed: '+e.message);}};act.appendChild(del);
+    const cm={fromAddress:m.from,to:m.to};
+    const rel=el('<button class="btn ok sm" style="margin-left:6px">Deliver</button>');rel.onclick=()=>confirmAct('Deliver',cm,async()=>{try{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/release',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});toast('Delivered to inbox');go('quarantine');}catch(e){toast('Failed: '+e.message);}});act.appendChild(rel);
+    const del=el('<button class="btn danger sm" style="margin-left:6px">Delete</button>');del.onclick=()=>confirmAct('Delete',cm,async()=>{try{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});toast('Deleted');go('quarantine');}catch(e){toast('Failed: '+e.message);}});act.appendChild(del);
     tb.appendChild(row);
   });
   card.appendChild(tbl);v.appendChild(card);
@@ -913,6 +914,26 @@ function renderWizard(){
 }
 function showModal(n){const h=document.getElementById('modalHost');h.innerHTML='';h.appendChild(n);document.getElementById('scrim').classList.add('open');}
 function closeModal(){document.getElementById('scrim').classList.remove('open');}
+
+// Lightweight confirm dialog (overlays whatever modal is open).
+function confirmBox(opts){
+  const scrim=el('<div></div>');scrim.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:150;display:grid;place-items:start center;padding-top:14vh';
+  const box=el(`<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;width:100%;max-width:460px;box-shadow:0 30px 80px -20px rgba(0,0,0,.65);animation:pop .15s ease">
+    <div style="display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line2)"><h3 style="flex:1;font-size:15px">${opts.title}</h3><button class="modal-x" id="cx">✕</button></div>
+    <div style="padding:16px 18px;font-size:13.5px;color:var(--txt)">${opts.body}</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--line2)"><button class="btn" id="cc">Cancel</button><button class="btn ${opts.confirmCls||'primary'}" id="ck">${opts.confirmLabel||'Confirm'}</button></div></div>`);
+  scrim.appendChild(box);document.body.appendChild(scrim);
+  const close=()=>scrim.remove();
+  box.querySelector('#cx').onclick=close;box.querySelector('#cc').onclick=close;
+  box.querySelector('#ck').onclick=()=>{close();opts.onConfirm();};
+  scrim.onclick=(e)=>{if(e.target===scrim)close();};
+}
+function confirmAct(verb,m,run){
+  const past={Deliver:'delivered to the inbox',Delete:'deleted',Remediate:'remediated and moved to quarantine'}[verb]||'processed';
+  confirmBox({title:`${verb} 1 email?`,
+    body:`This email will be ${past}.<ul style="margin:10px 0 0;padding-left:18px;color:var(--muted)"><li>from <b style="color:var(--txt)">${m.fromAddress}</b> to <b style="color:var(--txt)">${m.to}</b></li></ul>`,
+    confirmLabel:verb, confirmCls:verb==='Delete'?'danger':verb==='Deliver'?'ok':'primary', onConfirm:run});
+}
 
 /* init */
 boot();
