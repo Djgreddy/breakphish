@@ -138,6 +138,7 @@ function applySession(session){
   document.getElementById('who').textContent=session.name;
   document.getElementById('logoutBtn').style.display='inline-flex';
   go(STATE.role==='partner'?'customers':'dashboard');
+  applyBranding();
 }
 async function renderLogin(){
   document.getElementById('newBtn').style.display='none';
@@ -494,23 +495,56 @@ async function settingsSecurity(){
 }
 async function settingsCustomization(){
   const c=el('<div class="card p" style="max-width:680px"></div>');const z=SET.customization;
-  c.appendChild(sField('Logo URL',sInput(z.logoUrl,v=>z.logoUrl=v,'https://… (file upload coming later)')));
-  const bg=el('<div class="field"><label>Background color</label></div>');const col=el('<input type="color">');col.value=z.backgroundColor||'#1b1240';col.style.cssText='width:56px;height:38px;border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer';col.oninput=()=>z.backgroundColor=col.value;bg.appendChild(col);c.appendChild(bg);
+  // Logo upload with live preview. Stored as a base64 data URL in settings
+  // (persisted in Postgres), so it survives redeploys. Max 1 MB.
+  const logoRow=el('<div class="field"><label>Logo</label></div>');
+  const prev=el('<div style="display:flex;align-items:center;gap:14px"></div>');
+  const box=el(`<div style="width:120px;height:60px;border:1px solid var(--line);border-radius:10px;display:grid;place-items:center;overflow:hidden;background:${z.backgroundColor||'#1b1240'}"></div>`);
+  const paintLogo=()=>{box.style.background=z.backgroundColor||'#1b1240';box.innerHTML=z.logoDataUrl?`<img src="${z.logoDataUrl}" style="max-width:100%;max-height:100%">`:'<span style="color:#fff;font-size:11px;opacity:.7">No image</span>';};
+  paintLogo();
+  const pick=el('<input type="file" accept="image/*" style="display:none">');
+  const upBtn=el('<button class="btn sm">Upload logo</button>');upBtn.onclick=()=>pick.click();
+  const rmBtn=el('<button class="btn sm" style="color:var(--danger)">Remove</button>');rmBtn.onclick=()=>{z.logoDataUrl='';paintLogo();};
+  pick.onchange=()=>{const f=pick.files[0];if(!f)return;if(f.size>1048576){toast('Logo must be under 1 MB');return;}const r=new FileReader();r.onload=()=>{z.logoDataUrl=r.result;paintLogo();};r.readAsDataURL(f);};
+  const btns=el('<div style="display:flex;flex-direction:column;gap:8px"></div>');btns.appendChild(upBtn);btns.appendChild(rmBtn);
+  prev.appendChild(box);prev.appendChild(btns);prev.appendChild(pick);
+  logoRow.appendChild(prev);
+  logoRow.appendChild(el('<div style="font-size:11px;color:var(--faint);margin-top:8px">Recommended 140×70px. Max 1 MB. Shown in the console and (later) quarantine digests.</div>'));
+  c.appendChild(logoRow);
+  const bg=el('<div class="field"><label>Background color</label></div>');const col=el('<input type="color">');col.value=z.backgroundColor||'#1b1240';col.style.cssText='width:56px;height:38px;border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer';col.oninput=()=>{z.backgroundColor=col.value;paintLogo();};bg.appendChild(col);c.appendChild(bg);
   c.appendChild(sField('Application name',sInput(z.appName,v=>z.appName=v)));
   const act=el('<div style="display:flex;align-items:center;gap:12px;padding:8px 0"><div style="font-weight:600;font-size:13.5px">Active</div></div>');const tog=makeToggle(Boolean(z.active));tog.onclick=(()=>{const o=tog.onclick;return()=>{o&&o();z.active=tog._get();};})();act.appendChild(tog);c.appendChild(act);
-  c.appendChild(sSaveBar());return c;
+  const sb=el('<div style="margin-top:18px"></div>');const save=el('<button class="btn primary">Save</button>');save.onclick=async()=>{await saveSet(save);applyBranding();};sb.appendChild(save);c.appendChild(sb);
+  return c;
+}
+
+// Apply the current scope's logo + app name to the sidebar (best-effort).
+async function applyBranding(){
+  try{const r=await api('/settings/config');const z=r.settings.customization;
+    const nm=document.querySelector('.brand .nm');const mark=document.querySelector('.brand .mark');
+    if(z.active&&z.appName)nm.textContent=z.appName;
+    if(z.active&&z.logoDataUrl&&mark){mark.outerHTML=`<img class="mark" src="${z.logoDataUrl}" style="width:32px;height:32px;object-fit:contain;border-radius:8px">`;}
+  }catch(e){}
 }
 async function settingsBanners(){
   const c=el('<div class="card p"></div>');
-  c.appendChild(el('<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Verdict banners</div><div style="font-size:11.5px;color:var(--faint);margin-bottom:12px">Shown on delivered mail. Use <span class="mono">{{sender}}</span> and <span class="mono">{{source}}</span>. (Stored; injection into mail is a follow-up.)</div>'));
-  SET_VERDICTS.forEach(vk=>{
-    const bn=SET.banners[vk]||(SET.banners[vk]={color:'#6b7280',message:''});
-    const rowEl=el('<div style="display:grid;grid-template-columns:140px 46px 1fr;gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--line2)"></div>');
-    rowEl.appendChild(el(`<div style="font-size:13px;font-weight:600;padding-top:8px">${VERDICT_LABEL[vk]}</div>`));
-    const col=el('<input type="color">');col.value=bn.color;col.style.cssText='width:40px;height:34px;border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer';col.oninput=()=>bn.color=col.value;rowEl.appendChild(col);
-    const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12.5px;font-family:inherit;min-height:52px;resize:vertical"></textarea>');ta.value=bn.message;ta.oninput=()=>bn.message=ta.value;rowEl.appendChild(ta);
-    c.appendChild(rowEl);
-  });
+  c.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin-bottom:14px">Warning banners shown on delivered mail. Use <span class="mono">{{sender}}</span> and <span class="mono">{{source}}</span> as placeholders. <b style="color:var(--txt)">Stored now; injection into delivered mail is the next step.</b></div>'));
+  function group(title, obj){
+    c.appendChild(el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:4px 0 6px">${title}</div>`));
+    const head=el('<div style="display:grid;grid-template-columns:150px 46px 1fr;gap:10px;font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:0 0 6px"><div>Name</div><div>Color</div><div>Message</div></div>');
+    c.appendChild(head);
+    Object.keys(obj).forEach(name=>{
+      const bn=obj[name];
+      const rowEl=el('<div style="display:grid;grid-template-columns:150px 46px 1fr;gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--line2)"></div>');
+      rowEl.appendChild(el(`<div style="font-size:13px;font-weight:600;padding-top:8px">${name}</div>`));
+      const col=el('<input type="color">');col.value=bn.color;col.style.cssText='width:40px;height:34px;border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer';col.oninput=()=>bn.color=col.value;rowEl.appendChild(col);
+      const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12.5px;font-family:inherit;min-height:52px;resize:vertical"></textarea>');ta.value=bn.message;ta.oninput=()=>bn.message=ta.value;rowEl.appendChild(ta);
+      c.appendChild(rowEl);
+    });
+  }
+  group('Verdict banners', SET.banners.verdict);
+  c.appendChild(el('<div style="height:18px"></div>'));
+  group('Contextual banners', SET.banners.contextual);
   c.appendChild(sSaveBar());return c;
 }
 

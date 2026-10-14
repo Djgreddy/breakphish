@@ -16,16 +16,44 @@ export interface Settings {
   };
   quarantineDigest: { frequency: string; days: string[]; times: string[]; verdicts: string[]; sendReleaseRequestsTo: string };
   security: { force2fa: boolean; ipAccess: IpRule[] };
-  customization: { logoUrl: string; backgroundColor: string; appName: string; active: boolean };
-  banners: Record<string, Banner>;
+  customization: { logoDataUrl: string; backgroundColor: string; appName: string; active: boolean };
+  banners: { verdict: Record<string, Banner>; contextual: Record<string, Banner> };
 }
 
 export const DIGEST_VERDICTS = ['clean','spam','spam_likely','phishing','malware','impersonation','policy_infomail','policy_geo'];
 
-const BANNER_MSG = (what: string) =>
-  `Warning! BreakPhish suspects this email is ${what}. [From: {{sender}}, {{source}}] Contact your IT provider before clicking links or responding.`;
-const BANNER_EXTERNAL =
-  `Warning! This email originated from outside your organization. [From: {{sender}}, {{source}}] Do not click links or open attachments unless you recognize the sender.`;
+const suspect = (w: string) =>
+  `Warning! BreakPhish suspects this email is ${w}. [From: {{sender}}, {{source}}] Contact your IT provider before clicking any links or responding to the email.`;
+const external =
+  `Warning! This email originated from outside your organization. [From: {{sender}}, {{source}}] Do not click links or open attachments unless you recognize the sender and know the content is safe.`;
+const contains = (w: string) =>
+  `Warning! This email contains ${w} related content. [From: {{sender}}, {{source}}] Do not click links or open attachments unless you recognize the sender and know the content is safe.`;
+const RED = '#e11d48', AMBER = '#f3b340', BLUE = '#2563eb', GRAY = '#6b7280';
+
+const DEFAULT_BANNERS = {
+  verdict: {
+    'Banned':        { color: RED,   message: suspect('Banned') },
+    'Clean':         { color: AMBER, message: external },
+    'Impersonation': { color: RED,   message: suspect('Impersonation') },
+    'Infomail':      { color: BLUE,  message: external },
+    'Malware':       { color: RED,   message: suspect('Malware') },
+    'Phishing':      { color: RED,   message: suspect('Phishing') },
+    'Policy-Geo':    { color: RED,   message: `Warning! This email originated from a country not permitted by your organizational policy. [From: {{sender}}, {{source}}] Do not click links or open attachments unless you recognize the sender and know the content is safe.` },
+    'Spam-Definite': { color: GRAY,  message: suspect('Spam') },
+    'Spam-High':     { color: GRAY,  message: suspect('Spam') },
+    'Spam-Likely':   { color: GRAY,  message: suspect('Spam') },
+  } as Record<string, Banner>,
+  contextual: {
+    'Clean-Financial':   { color: AMBER, message: contains('financial') },
+    'Clean-Payroll':     { color: AMBER, message: contains('payroll') },
+    'Clean-Invoice':     { color: AMBER, message: contains('invoice/payment') },
+    'Clean-DisplayName': { color: AMBER, message: `Warning! The email sender closely matches someone in your organization. [From: {{sender}}, {{source}}] Do not click links or open attachments unless you recognize the sender and know the content is safe.` },
+    'Clean-NewSender':   { color: AMBER, message: `Warning! This is the first time you have received an email from this sender. [From: {{sender}}, {{source}}] Do not click links or open attachments unless you recognize the sender and know the content is safe.` },
+    'Clean-Lookalike':   { color: AMBER, message: `Warning! The sender's domain looks similar to a domain you trust. [From: {{sender}}, {{source}}] Do not click links or open attachments unless you recognize the sender and know the content is safe.` },
+    'Clean-ReplyTo':     { color: AMBER, message: `Warning! The Reply-To address differs from the sender's address. [From: {{sender}}, {{source}}] Do not click links or open attachments unless you recognize the sender and know the content is safe.` },
+    'Clean-External':    { color: AMBER, message: external },
+  } as Record<string, Banner>,
+};
 
 export const DEFAULT_SETTINGS: Settings = {
   general: { companyName: 'Your Company', timezone: '(UTC-06:00) Central Time (US & Canada)' },
@@ -39,17 +67,8 @@ export const DEFAULT_SETTINGS: Settings = {
     sendReleaseRequestsTo: 'Administrators',
   },
   security: { force2fa: false, ipAccess: [] },
-  customization: { logoUrl: '', backgroundColor: '#1b1240', appName: 'BreakPhish', active: false },
-  banners: {
-    clean:          { color: '#f3b340', message: BANNER_EXTERNAL },
-    spam:           { color: '#6b7280', message: BANNER_MSG('Spam') },
-    spam_likely:    { color: '#6b7280', message: BANNER_MSG('Spam') },
-    phishing:       { color: '#e11d48', message: BANNER_MSG('Phishing') },
-    malware:        { color: '#e11d48', message: BANNER_MSG('Malware') },
-    impersonation:  { color: '#e11d48', message: BANNER_MSG('Impersonation') },
-    policy_infomail:{ color: '#2563eb', message: BANNER_EXTERNAL },
-    policy_geo:     { color: '#e11d48', message: `Warning! This email originated from a country not permitted by your organizational policy. [From: {{sender}}, {{source}}]` },
-  },
+  customization: { logoDataUrl: '', backgroundColor: '#1b1240', appName: 'BreakPhish', active: false },
+  banners: DEFAULT_BANNERS,
 };
 
 const cache = new Map<string, Settings>();
@@ -64,7 +83,10 @@ function merge(stored: any): Settings {
     quarantineDigest: { ...DEFAULT_SETTINGS.quarantineDigest, ...(stored?.quarantineDigest ?? {}) },
     security: { ...DEFAULT_SETTINGS.security, ...(stored?.security ?? {}) },
     customization: { ...DEFAULT_SETTINGS.customization, ...(stored?.customization ?? {}) },
-    banners: { ...DEFAULT_SETTINGS.banners, ...(stored?.banners ?? {}) },
+    banners: {
+      verdict: { ...DEFAULT_SETTINGS.banners.verdict, ...(stored?.banners?.verdict ?? {}) },
+      contextual: { ...DEFAULT_SETTINGS.banners.contextual, ...(stored?.banners?.contextual ?? {}) },
+    },
   };
 }
 
