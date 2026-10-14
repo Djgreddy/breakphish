@@ -163,3 +163,9 @@ create table if not exists audit_log (
   ip          text
 );
 create index if not exists audit_at_idx on audit_log(at desc);
+
+-- ------- customer management fields (added for the management layer) -------
+-- Idempotent: safe to run on an existing customers table.
+alter table customers add column if not exists licenses   integer     not null default 0;
+alter table customers add column if not exists ordered_at  timestamptz not null default now();
+alter table customers add column if not exists flags       jsonb       not null default '{}';

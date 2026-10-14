@@ -222,46 +222,40 @@ VIEWS.customers=async function(){
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Customers</h1><p>Live from the pipeline · ${customers.length} organizations</p></div>`));
   const card=el('<div class="card"></div>');
-  const tbl=el(`<table><thead><tr><th>Company</th><th>Domain</th><th>Products</th><th>Connection</th><th>Synced users</th><th>Threats (live)</th><th>Access</th></tr></thead><tbody></tbody></table>`);
+  const bar=el(`<div class="filters"><input id="csearch" placeholder="Search company or domain…" style="flex:1;min-width:200px"></div>`);
+  card.appendChild(bar);
+  const tbl=el(`<table><thead><tr><th>Company</th><th>Domain</th><th>Products</th><th>Service</th><th>Connection</th><th>Users</th><th>Licenses</th><th>Ordered</th><th style="text-align:right">Access</th></tr></thead><tbody></tbody></table>`);
   const tb=tbl.querySelector('tbody');
-  customers.forEach((c,i)=>{
-    const prods=c.products.map(p=>p==='email_security'?'<span class="pill p-info">Email Security</span>':'<span class="pill p-violet">Awareness</span>').join(' ');
-    const conn=c.connection.status==='connected'
-      ?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Connected</span>'
-      :'<span class="pill p-muted">Awaiting consent</span>';
-    const row=el(`<tr class="${c.connection.status==='connected'?'ck':''}">
-      <td><div class="co"><div class="lg" style="background:${COLORS[i%COLORS.length]}">${initials(c.name)}</div><div style="font-weight:600">${c.name}</div></div></td>
-      <td style="color:var(--muted)">${c.domain}</td><td>${prods}</td><td>${conn}</td>
-      <td class="mono">${c.syncedUsers||'—'}</td>
-      <td class="mono" style="color:${c.threats?'var(--danger)':'var(--muted)'}">${c.connection.status==='connected'?c.threats:'—'}</td>
-      <td></td></tr>`);
-    const act=row.children[6];
-    act.style.whiteSpace='nowrap';
-    if(c.connection.status==='connected'){
-      const b=el('<button class="btn ok sm">Login as →</button>');b.onclick=(e)=>{e.stopPropagation();loginAs(c);};act.appendChild(b);
-      const rs=el('<button class="btn sm" style="margin-left:6px" title="Re-sync users &amp; mail">↻</button>');
-      rs.onclick=async(e)=>{e.stopPropagation();rs.textContent='…';rs.disabled=true;
-        try{const r=await api('/customers/'+c.id+'/resync',{method:'POST'});toast(`Synced ${r.users} users, scored ${r.scored} new`);go('customers');}
-        catch(err){toast('Re-sync failed: '+err.message);rs.textContent='↻';rs.disabled=false;}};
-      act.appendChild(rs);
-      row.onclick=()=>loginAs(c);
-    } else {
-      const b=el('<button class="btn teal sm">Connect Microsoft 365</button>');b.onclick=async(e)=>{e.stopPropagation();b.textContent='Connecting…';b.disabled=true;
-        try{const r=await api('/customers/'+c.id+'/connect',{method:'POST'});
-          if(r.redirect){toast('Opening Microsoft consent…');window.location.href=r.redirect;return;}
-          toast('Connected & synced '+c.name);go('customers');}
-        catch(err){toast('Connect failed: '+err.message);b.textContent='Connect Microsoft 365';b.disabled=false;}
-      };act.appendChild(b);
-    }
-    const del=el('<button class="btn sm" style="margin-left:6px;color:var(--danger)" title="Delete customer">✕</button>');
-    del.onclick=async(e)=>{e.stopPropagation();
-      if(!confirm(`Delete ${c.name}? This removes its users, mail, and all data. This cannot be undone.`))return;
-      del.textContent='…';del.disabled=true;
-      try{await api('/customers/'+c.id,{method:'DELETE'});toast('Deleted '+c.name);go('customers');}
-      catch(err){toast('Delete failed: '+err.message);del.textContent='✕';del.disabled=false;}};
-    act.appendChild(del);
-    tb.appendChild(row);
-  });
+  function renderRows(filter){
+    tb.innerHTML='';
+    const list=customers.filter(c=>!filter||c.name.toLowerCase().includes(filter)||c.domain.toLowerCase().includes(filter));
+    if(!list.length){tb.appendChild(el('<tr><td colspan="9" style="padding:36px;text-align:center;color:var(--faint)">No customers.</td></tr>'));return;}
+    list.forEach((c,i)=>{
+      const prods=c.products.map(p=>p==='email_security'?'<span class="pill p-info">Email Security</span>':'<span class="pill p-violet">Awareness</span>').join(' ');
+      const conn=c.connection.status==='connected'
+        ?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Connected</span>'
+        :'<span class="pill p-muted">Awaiting consent</span>';
+      const ordered=c.orderedAt?new Date(c.orderedAt).toLocaleDateString():'—';
+      const row=el(`<tr class="${c.connection.status==='connected'?'ck':''}">
+        <td><div class="co"><div class="lg" style="background:${COLORS[i%COLORS.length]}">${initials(c.name)}</div><div style="font-weight:600">${c.name}</div></div></td>
+        <td style="color:var(--muted)">${c.domain}</td><td>${prods}</td>
+        <td><span class="pill p-muted">${c.service||'—'}</span></td>
+        <td>${conn}</td>
+        <td class="mono">${c.syncedUsers||'—'}</td>
+        <td class="mono">${c.licenses||'—'}</td>
+        <td class="mono" style="color:var(--muted)">${ordered}</td>
+        <td style="text-align:right;white-space:nowrap"></td></tr>`);
+      const act=row.children[8];
+      if(c.connection.status==='connected'){const b=el('<button class="btn ok sm">Login As →</button>');b.onclick=(e)=>{e.stopPropagation();loginAs(c);};act.appendChild(b);row.onclick=()=>loginAs(c);}
+      else{const b=el('<button class="btn teal sm">Connect</button>');b.onclick=(e)=>{e.stopPropagation();connectCustomer(c,b);};act.appendChild(b);}
+      const kebab=el('<button class="btn sm" style="margin-left:6px;padding:6px 9px" title="Actions">⋮</button>');
+      kebab.onclick=(e)=>{e.stopPropagation();openRowMenu(kebab,c);};
+      act.appendChild(kebab);
+      tb.appendChild(row);
+    });
+  }
+  let deb; bar.querySelector('#csearch').oninput=(e)=>{clearTimeout(deb);deb=setTimeout(()=>renderRows(e.target.value.trim().toLowerCase()),200);};
+  renderRows('');
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
@@ -447,6 +441,77 @@ VIEWS.settings=async function(){
   v.appendChild(el('<div class="card p" style="margin-top:16px;color:var(--muted);font-size:13px"><b style="color:var(--txt)">Note:</b> updates are applied from the terminal by design — there is no in-app deploy button, to avoid exposing code execution over the web. This page only reports status.</div>'));
   return v;
 };
+
+/* ---- customer row actions ---- */
+async function connectCustomer(c,btn){
+  btn.textContent='…';btn.disabled=true;
+  try{const r=await api('/customers/'+c.id+'/connect',{method:'POST'});
+    if(r.redirect){toast('Opening Microsoft consent…');window.location.href=r.redirect;return;}
+    toast('Connected & synced '+c.name);go('customers');}
+  catch(err){toast('Connect failed: '+err.message);btn.textContent='Connect';btn.disabled=false;}
+}
+function closeRowMenu(){if(window._rm){window._rm.remove();window._rm=null;}}
+document.addEventListener('click',closeRowMenu);
+function openRowMenu(btn,c){
+  closeRowMenu();
+  const connected=c.connection.status==='connected';
+  const items=[
+    {label:'✎  Edit', onClick:()=>openEditCustomer(c)},
+    connected?{label:'↻  Azure Sync', onClick:()=>resyncCustomer(c)}:null,
+    connected?{label:'⟳  O365 Reauthorize', onClick:()=>reauth(c)}:null,
+    {label:'⇄  Switch Service', onClick:()=>toast('Switching service (Gateway/Unified) — coming soon')},
+    {label:'✕  Delete customer', danger:true, onClick:()=>deleteCust(c)},
+  ].filter(Boolean);
+  const m=el('<div></div>');
+  m.style.cssText='position:fixed;z-index:120;background:#fff;border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:0 18px 44px -14px rgba(20,27,46,.28);min-width:200px';
+  items.forEach(it=>{const b=el(`<button>${it.label}</button>`);b.style.cssText='display:block;width:100%;text-align:left;padding:9px 11px;border-radius:8px;font-size:13px;font-weight:500;'+(it.danger?'color:var(--danger)':'');b.onmouseover=()=>b.style.background='var(--surface2)';b.onmouseout=()=>b.style.background='none';b.onclick=(e)=>{e.stopPropagation();closeRowMenu();it.onClick();};m.appendChild(b);});
+  document.body.appendChild(m);
+  const r=btn.getBoundingClientRect();
+  m.style.top=(r.bottom+4)+'px';m.style.left=Math.max(8,r.right-200)+'px';
+  window._rm=m;
+}
+async function resyncCustomer(c){try{const r=await api('/customers/'+c.id+'/resync',{method:'POST'});toast(`Synced ${r.users} users, scored ${r.scored} new`);go('customers');}catch(e){toast('Re-sync failed: '+e.message);}}
+async function reauth(c){try{const r=await api('/customers/'+c.id+'/connect',{method:'POST'});if(r.redirect){toast('Opening Microsoft consent…');window.location.href=r.redirect;return;}toast('Reauthorized '+c.name);go('customers');}catch(e){toast('Reauthorize failed: '+e.message);}}
+async function deleteCust(c){if(!confirm(`Delete ${c.name}? This removes its users, mail, and all data. This cannot be undone.`))return;try{await api('/customers/'+c.id,{method:'DELETE'});toast('Deleted '+c.name);go('customers');}catch(e){toast('Delete failed: '+e.message);}}
+
+function makeToggle(on){
+  const w=el('<div style="width:40px;height:22px;border-radius:12px;position:relative;cursor:pointer;flex:none"></div>');
+  const k=el('<div style="position:absolute;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:.15s"></div>');
+  w.appendChild(k);let s=on;const paint=()=>{w.style.background=s?'var(--brand)':'#cfd4e6';k.style.left=s?'20px':'2px';};paint();
+  w.onclick=()=>{s=!s;paint();};w._get=()=>s;return w;
+}
+const FLAG_META=[
+  ['partnerAccess','Partner Access','Allows partner access to the customer account for management'],
+  ['customerBanners','Customer Banners','Allows the customer to use its own warning banners'],
+  ['analyticsReports','Analytics Reports','Allows the customer to generate analytics reports'],
+  ['require2fa','Require 2FA','Require two-factor authentication for this customer'],
+  ['forceAzureLogin','Force Azure Login','Force Azure SSO (already enforced — sign-in is SSO-only)'],
+];
+function openEditCustomer(c){
+  const modal=el(`<div class="modal"><div class="modal-h"><h2>Edit ${c.name}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="eb"></div></div>`);
+  showModal(modal);const b=modal.querySelector('#eb');
+  b.appendChild(el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">General information</div>`));
+  b.appendChild(el(`<div class="field"><label>Customer ID</label><input value="${c.id}" disabled style="background:var(--surface2);color:var(--muted)"></div>`));
+  b.appendChild(el(`<div class="field"><label>Customer name</label><input id="ename" value="${c.name}"></div>`));
+  b.appendChild(el(`<div class="field"><label>Service</label><input value="${c.service||'—'}" disabled style="background:var(--surface2);color:var(--muted)"></div>`));
+  b.appendChild(el(`<div class="field"><label>Mail platform</label><input value="Office 365" disabled style="background:var(--surface2);color:var(--muted)"></div>`));
+  b.appendChild(el(`<div class="field"><label>Licenses</label><input id="elic" value="${c.licenses||0}" inputmode="numeric"></div>`));
+  b.appendChild(el(`<div class="field"><label>Domain</label><input value="${c.domain}" disabled style="background:var(--surface2);color:var(--muted)"></div>`));
+  b.appendChild(el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:18px 0 6px">Additional</div>`));
+  const toggles={};
+  FLAG_META.forEach(([key,label,desc])=>{
+    const rowEl=el(`<div style="display:flex;align-items:center;gap:14px;padding:11px 0;border-bottom:1px solid var(--line2)"><div style="flex:1"><div style="font-size:13.5px;font-weight:600">${label}</div><div style="font-size:11.5px;color:var(--faint)">${desc}</div></div></div>`);
+    const t=makeToggle(Boolean(c.flags?.[key]));toggles[key]=t;rowEl.appendChild(t);b.appendChild(rowEl);
+  });
+  const foot=el(`<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" id="esave">Submit</button></div>`);
+  foot.querySelector('#esave').onclick=async()=>{
+    const flags={};FLAG_META.forEach(([k])=>flags[k]=toggles[k]._get());
+    try{await api('/customers/'+c.id,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({name:b.querySelector('#ename').value,licenses:Number(b.querySelector('#elic').value)||0,flags})});
+      closeModal();toast('Customer updated');go('customers');}
+    catch(e){toast('Update failed: '+e.message);}
+  };
+  b.appendChild(foot);
+}
 
 /* ---- wizard (create via API) ---- */
 const WIZ={step:0,name:'',domain:'',mailboxes:'',products:['email_security']};

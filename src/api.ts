@@ -3,7 +3,7 @@
 // reporting. No new business logic lives here.
 
 import express from 'express';
-import { onboardCustomer, getCustomer, listCustomers, deleteCustomer, type Customer } from './onboarding';
+import { onboardCustomer, getCustomer, listCustomers, deleteCustomer, editCustomer, type Customer } from './onboarding';
 import { buildConsentUrl, handleConsentCallback, getConnection, deleteConnection } from './consent';
 import { syncTenant } from './directory/syncService';
 import { store } from './store';
@@ -54,8 +54,10 @@ function customerSummary(c: Customer) {
   const d = c.products.includes('email_security') ? dashboard(c.id) : null;
   return {
     id: c.id, name: c.name, domain: c.primaryDomain, products: c.products,
-    mailboxes: c.mailboxes, licenses: c.products.includes('sat') ? c.mailboxes : 0,
+    mailboxes: c.mailboxes, licenses: c.licenses,
     status: 'active',
+    service: c.integrationModel === 'api' ? 'BreakPhish 365' : (c.integrationModel ?? ''),
+    orderedAt: c.orderedAt, flags: c.flags, integrationModel: c.integrationModel,
     connection: conn ? { status: conn.status, verifiedDomains: conn.verifiedDomains ?? [] } : { status: 'not_connected', verifiedDomains: [] },
     syncedUsers: store.usersForTenant(c.id).length,
     threats: d ? d.threats : 0, processed: d ? d.processed : 0,
@@ -99,6 +101,18 @@ export function buildApi() {
     const c = getCustomer(req.params.id);
     if (!c) return res.status(404).json({ error: 'not found' });
     res.json(customerSummary(c));
+  });
+
+  // Edit a customer's name, license count, and feature flags.
+  api.patch('/customers/:id', requirePartner, async (req, res) => {
+    try {
+      const { name, licenses, flags } = req.body ?? {};
+      const c = await editCustomer(req.params.id, { name, licenses, flags });
+      if (!c) return res.status(404).json({ error: 'not found' });
+      res.json(customerSummary(c));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
   });
 
   api.get('/customers/:id/consent-url', (req, res) => {

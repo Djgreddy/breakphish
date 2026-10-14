@@ -25,11 +25,26 @@ export class ComingSoonError extends Error {
   }
 }
 
+export interface CustomerFlags {
+  partnerAccess: boolean;
+  customerBanners: boolean;
+  analyticsReports: boolean;
+  require2fa: boolean;
+  forceAzureLogin: boolean;
+}
+export const DEFAULT_FLAGS: CustomerFlags = {
+  partnerAccess: true, customerBanners: false, analyticsReports: false,
+  require2fa: true, forceAzureLogin: true, // all sign-in is already Azure SSO
+};
+
 export interface Customer extends Tenant {
   primaryDomain: string;
   products: Product[];
   integrationModel?: IntegrationModel;
   mailboxes: number;
+  licenses: number;
+  orderedAt: string;
+  flags: CustomerFlags;
   createdAt: string;
 }
 
@@ -41,6 +56,7 @@ function persist(c: Customer): Promise<void> | void {
     id: c.id, name: c.name, primaryDomain: c.primaryDomain, entraTenantId: c.entraTenantId,
     verifiedDomains: c.verifiedDomains, products: c.products, integrationModel: c.integrationModel,
     mailboxes: c.mailboxes, status: 'active',
+    licenses: c.licenses, orderedAt: c.orderedAt, flags: c.flags,
   });
 }
 
@@ -67,11 +83,25 @@ export async function onboardCustomer(input: OnboardInput): Promise<Customer> {
     products: input.products,
     integrationModel: input.integrationModel,
     mailboxes: input.mailboxes ?? 0,
+    licenses: input.products.includes('sat') ? (input.mailboxes ?? 0) : 0,
+    orderedAt: new Date().toISOString(),
+    flags: { ...DEFAULT_FLAGS },
     createdAt: new Date().toISOString(),
   };
   customers.set(id, customer);
   await persist(customer);
   return customer;
+}
+
+// Edit mutable customer fields (name, licenses, feature flags).
+export async function editCustomer(id: string, patch: { name?: string; licenses?: number; flags?: Partial<CustomerFlags> }): Promise<Customer | null> {
+  const c = customers.get(id);
+  if (!c) return null;
+  if (patch.name != null) { c.name = patch.name; const t = store.getTenant(id); if (t) t.name = patch.name; }
+  if (patch.licenses != null) c.licenses = Math.max(0, Math.floor(patch.licenses));
+  if (patch.flags) c.flags = { ...c.flags, ...patch.flags };
+  await persist(c);
+  return c;
 }
 
 // Called after a real Microsoft connection resolves the true tenant id and
@@ -122,6 +152,9 @@ export async function hydrateCustomers(): Promise<number> {
       products: (r.products ?? []) as Product[],
       integrationModel: (r.integration_model ?? undefined) as IntegrationModel | undefined,
       mailboxes: r.mailboxes,
+      licenses: r.licenses ?? 0,
+      orderedAt: r.ordered_at ? (r.ordered_at instanceof Date ? r.ordered_at.toISOString() : r.ordered_at) : new Date().toISOString(),
+      flags: { ...DEFAULT_FLAGS, ...(r.flags ?? {}) },
       createdAt: new Date().toISOString(),
     });
   }
