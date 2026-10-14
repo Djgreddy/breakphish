@@ -392,28 +392,40 @@ async function openMessage(id){
       ${kv('Spam Score',`<span class="mono">${(spamScore/14).toFixed(2)}</span>`)}
       ${kv('Known Contact',m.firstTimeSender?'No':'Yes')}
       ${kv('Signals',(a.signals||[]).length?(a.signals.map(s=>`<div class="sig" style="padding:6px 0"><div class="ic ${toneCls[s.category]||'p-muted'}">!</div><div class="st"><b>${s.detail}</b><span style="color:var(--muted);font-size:12px">${s.code}</span></div><div class="w">+${s.weight}</div></div>`).join('')):'No risk signals.')}</div>`,
-    'Preview':()=>`<div style="padding:16px;color:var(--warn);font-size:13px">No preview available. Preview is only shown for quarantined mail; clean and delivered mail content is not stored.</div>`,
+    'Preview':()=>{const held=['quarantine','remediated'].includes(a.disposition);return held&&m.bodyText?`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Email body</div><div style="border:1px solid var(--line2);border-radius:10px;padding:14px;font-size:13px;white-space:pre-wrap;color:var(--txt);max-height:46vh;overflow:auto">${(m.bodyText||'').replace(/</g,'&lt;')}</div>`:`<div style="padding:16px;color:var(--warn);font-size:13px">No preview available. Preview is only shown for quarantined mail; clean and delivered mail content is not stored.</div>`;},
     'Event Log':()=>`<div style="border:1px solid var(--line2);border-radius:10px;overflow:hidden"><div style="display:grid;grid-template-columns:200px 1fr;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line2);font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em"><div>Timestamp</div><div>Event</div></div>${(d.events||[]).map(e=>`<div style="display:grid;grid-template-columns:200px 1fr;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line2)"><div class="mono" style="color:var(--muted)">${new Date(e.at).toLocaleString()}</div><div><span style="color:var(--ok)">●</span> ${e.event}</div></div>`).join('')}</div>`,
   };
   let tab='Email Details';
+  const held=['quarantine','remediated'].includes(a.disposition);
   const modal=el(`<div class="modal" style="max-width:760px"><div class="modal-h"><h2 style="flex:1">View</h2><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div style="padding:0 20px"><div class="tabs" id="mtabs" style="margin:0"></div></div>
     <div class="modal-b" id="mbody" style="max-height:60vh;overflow:auto"></div>
-    <div style="display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Close</button><div style="flex:1"></div>
-      <div style="position:relative"><button class="btn primary" id="rembtn">⧖ Remediate ▾</button></div></div></div>`);
+    <div style="display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)" id="mfoot"><button class="btn" onclick="closeModal()">Close</button><div style="flex:1"></div></div></div>`);
   showModal(modal);
-  const tabsEl=modal.querySelector('#mtabs'),bodyEl=modal.querySelector('#mbody');
+  const tabsEl=modal.querySelector('#mtabs'),bodyEl=modal.querySelector('#mbody'),foot=modal.querySelector('#mfoot');
   const paint=()=>{bodyEl.innerHTML=TABS[tab]();};
   Object.keys(TABS).forEach(t=>{const bt=el(`<button class="${tab===t?'on':''}">${t}</button>`);bt.onclick=()=>{tab=t;tabsEl.querySelectorAll('button').forEach(x=>x.classList.remove('on'));bt.classList.add('on');paint();};tabsEl.appendChild(bt);});
   paint();
-  // Remediate menu
-  modal.querySelector('#rembtn').onclick=(e)=>{e.stopPropagation();
-    const items=[['plain','Remediate'],['block_recipient','Remediate & block sender for recipient'],['block_org','Remediate & block sender for organization']];
-    const mn=el('<div></div>');mn.style.cssText='position:fixed;z-index:130;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:0 18px 44px -14px rgba(0,0,0,.5);min-width:280px';
-    items.forEach(([opt,lbl])=>{const b=el(`<button>${lbl}</button>`);b.style.cssText='display:block;width:100%;text-align:left;padding:9px 11px;border-radius:8px;font-size:13px';b.onmouseover=()=>b.style.background='var(--surface2)';b.onmouseout=()=>b.style.background='none';b.onclick=async()=>{mn.remove();try{await api('/customers/'+STATE.customerId+'/messages/'+id+'/remediate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:opt})});closeModal();toast('Remediated'+(opt!=='plain'?' & blocked sender':''));refresh&&refresh();}catch(err){toast('Failed: '+err.message);}};mn.appendChild(b);});
-    document.body.appendChild(mn);const r=e.target.getBoundingClientRect();mn.style.left=Math.max(8,r.right-280)+'px';mn.style.top=(r.top-10-(items.length*40))+'px';
-    const close=()=>{mn.remove();document.removeEventListener('click',close);};setTimeout(()=>document.addEventListener('click',close),0);
-  };
+  // split-button with a dropdown of options
+  function splitBtn(label,cls,items){
+    const wrap=el('<div style="position:relative"></div>');
+    const b=el(`<button class="btn ${cls} sm">${label} ▾</button>`);
+    b.onclick=(e)=>{e.stopPropagation();
+      const mn=el('<div></div>');mn.style.cssText='position:fixed;z-index:130;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:0 18px 44px -14px rgba(0,0,0,.5);min-width:300px';
+      items.forEach(([lbl,fn])=>{const ib=el(`<button>${lbl}</button>`);ib.style.cssText='display:block;width:100%;text-align:left;padding:9px 11px;border-radius:8px;font-size:13px';ib.onmouseover=()=>ib.style.background='var(--surface2)';ib.onmouseout=()=>ib.style.background='none';ib.onclick=()=>{mn.remove();fn();};mn.appendChild(ib);});
+      document.body.appendChild(mn);const r=b.getBoundingClientRect();mn.style.left=Math.max(8,r.right-300)+'px';mn.style.top=(r.top-10-(items.length*40))+'px';
+      const close=()=>{mn.remove();document.removeEventListener('click',close);};setTimeout(()=>document.addEventListener('click',close),0);
+    };
+    wrap.appendChild(b);return wrap;
+  }
+  const act=async(path,option,msg)=>{try{await api('/customers/'+STATE.customerId+'/messages/'+id+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option})});closeModal();toast(msg);refresh&&refresh();}catch(e){toast('Failed: '+e.message);}};
+  if(held){
+    foot.appendChild(splitBtn('Deliver','ok',[['Deliver',()=>act('/release','plain','Delivered to inbox')],['Deliver & allow sender for recipient',()=>act('/release','allow_recipient','Delivered & allowed sender')],['Deliver & allow sender for organization',()=>act('/release','allow_org','Delivered & allowed sender (org)')]]));
+    foot.appendChild(splitBtn('Delete','danger',[['Delete',()=>act('/delete','plain','Deleted')],['Delete & block sender for recipient',()=>act('/delete','block_recipient','Deleted & blocked sender')],['Delete & block sender for organization',()=>act('/delete','block_org','Deleted & blocked sender (org)')]]));
+    const dl=el('<button class="btn sm">⤓ Download</button>');dl.onclick=()=>{window.open('/api/customers/'+STATE.customerId+'/messages/'+id+'/download','_blank');};foot.appendChild(dl);
+  } else {
+    foot.appendChild(splitBtn('Remediate','primary',[['Remediate',()=>act('/remediate','plain','Remediated')],['Remediate & block sender for recipient',()=>act('/remediate','block_recipient','Remediated & blocked sender')],['Remediate & block sender for organization',()=>act('/remediate','block_org','Remediated & blocked sender (org)')]]));
+  }
 }
 
 VIEWS.quarantine=async function(){
@@ -421,11 +433,15 @@ VIEWS.quarantine=async function(){
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Quarantine</h1><p>${data.total} held or remediated messages</p></div>`));
   const card=el('<div class="card"></div>');
-  const tbl=el(`<table><thead><tr><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th>Action</th></tr></thead><tbody></tbody></table>`);
+  const tbl=el(`<table><thead><tr><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th style="text-align:right">Action</th></tr></thead><tbody></tbody></table>`);
   const tb=tbl.querySelector('tbody');
+  if(!data.rows.length)tb.appendChild(el('<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--faint)">No held messages.</td></tr>'));
   data.rows.slice(0,25).forEach(m=>{
-    const row=el(`<tr><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td><td style="color:var(--muted)">${m.to}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td><td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td><td><button class="btn sm">Release</button></td></tr>`);
-    row.querySelector('button').onclick=async()=>{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/release',{method:'POST'});toast('Release requested');};
+    const row=el(`<tr><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td><td style="color:var(--muted)">${m.to}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td><td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+    const act=row.children[4];
+    const vw=el('<button class="btn sm">View</button>');vw.onclick=()=>openMessage(m.id);act.appendChild(vw);
+    const rel=el('<button class="btn ok sm" style="margin-left:6px">Deliver</button>');rel.onclick=async()=>{try{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/release',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});toast('Delivered to inbox');go('quarantine');}catch(e){toast('Failed: '+e.message);}};act.appendChild(rel);
+    const del=el('<button class="btn danger sm" style="margin-left:6px">Delete</button>');del.onclick=async()=>{if(!confirm('Delete this message?'))return;try{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});toast('Deleted');go('quarantine');}catch(e){toast('Failed: '+e.message);}};act.appendChild(del);
     tb.appendChild(row);
   });
   card.appendChild(tbl);v.appendChild(card);

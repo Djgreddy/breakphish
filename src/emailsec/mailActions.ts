@@ -16,11 +16,15 @@ const QUARANTINE_FOLDER = 'BreakPhish Quarantine';
 export interface MailActions {
   moveToJunk(entraTenantId: string, userId: string, messageId: string): Promise<void>;
   moveToQuarantine(entraTenantId: string, userId: string, messageId: string): Promise<void>;
+  moveToInbox(entraTenantId: string, userId: string, messageId: string): Promise<void>; // release
+  moveToDeleted(entraTenantId: string, userId: string, messageId: string): Promise<void>;
 }
 
 class MockMailActions implements MailActions {
   async moveToJunk(_t: string, u: string, m: string) { console.log(`[mailActions:mock] junk ${u} ${m}`); }
   async moveToQuarantine(_t: string, u: string, m: string) { console.log(`[mailActions:mock] quarantine ${u} ${m}`); }
+  async moveToInbox(_t: string, u: string, m: string) { console.log(`[mailActions:mock] release→inbox ${u} ${m}`); }
+  async moveToDeleted(_t: string, u: string, m: string) { console.log(`[mailActions:mock] delete ${u} ${m}`); }
 }
 
 class GraphMailActions implements MailActions {
@@ -56,6 +60,12 @@ class GraphMailActions implements MailActions {
   async moveToQuarantine(entraTenantId: string, userId: string, messageId: string) {
     const fid = await this.quarantineFolderId(entraTenantId, userId);
     await this.move(entraTenantId, userId, messageId, fid);
+  }
+  async moveToInbox(entraTenantId: string, userId: string, messageId: string) {
+    await this.move(entraTenantId, userId, messageId, 'inbox'); // release back to inbox
+  }
+  async moveToDeleted(entraTenantId: string, userId: string, messageId: string) {
+    await this.move(entraTenantId, userId, messageId, 'deleteditems');
   }
 }
 

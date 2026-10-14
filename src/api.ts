@@ -14,6 +14,7 @@ import { dashboard, liveTracker } from './emailsec/reporting';
 import { ingestTenantMail } from './emailsec/mailIngest';
 import { applyDisposition } from './emailsec/mailActions';
 import { persistScored } from './db/hydrate';
+import { dbEnabled } from './db/db';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
 import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf } from './auth/middleware';
 import { getSettings, saveSettings } from './settings';
@@ -342,11 +343,57 @@ export function buildApi() {
     res.json({ rows: q, total: q.length });
   });
 
-  api.post('/customers/:id/messages/:mid/release', (req, res) => {
+  // Shared helper: find the recipient mailbox + connected tenant for a message.
+  function mailboxFor(id: string, m: any) {
+    const conn = getConnection(id);
+    const user = store.usersForTenant(id).find(u => u.email.toLowerCase() === m.to.toLowerCase());
+    return { conn, user };
+  }
+
+  // Release / deliver a held message back to the inbox.
+  // option: 'plain' | 'allow_recipient' | 'allow_org'
+  api.post('/customers/:id/messages/:mid/release', requireAuth, requireCustomerAccess, async (req, res) => {
+    try {
+      const id = req.params.id, mid = req.params.mid;
+      const m = emailStore.messages.get(mid); const a = emailStore.analysisFor(mid);
+      if (!m || !a) return res.status(404).json({ error: 'not found' });
+      a.disposition = 'deliver'; a.remediated = false;
+      emailStore.saveAnalysis(a); await persistScored(m, a);
+      const { conn, user } = mailboxFor(id, m);
+      if (conn?.entraTenantId && user) { try { await (await import('./emailsec/mailActions')).makeMailActions().moveToInbox(conn.entraTenantId, user.externalId, mid); } catch (e) { console.error('[release] move failed', (e as Error).message); } }
+      const option = String(req.body?.option ?? 'plain');
+      if (option === 'allow_recipient' || option === 'allow_org') {
+        await saveRule({ scope: option === 'allow_org' ? 'partner' : id, kind: 'allow', data: { sender: m.fromAddress, comment: `Allowed via release (${m.subject})` } });
+      }
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Delete a held message. option: 'plain' | 'block_recipient' | 'block_org'
+  api.post('/customers/:id/messages/:mid/delete', requireAuth, requireCustomerAccess, async (req, res) => {
+    try {
+      const id = req.params.id, mid = req.params.mid;
+      const m = emailStore.messages.get(mid); const a = emailStore.analysisFor(mid);
+      if (!m || !a) return res.status(404).json({ error: 'not found' });
+      const { conn, user } = mailboxFor(id, m);
+      if (conn?.entraTenantId && user) { try { await (await import('./emailsec/mailActions')).makeMailActions().moveToDeleted(conn.entraTenantId, user.externalId, mid); } catch (e) { console.error('[delete] move failed', (e as Error).message); } }
+      const option = String(req.body?.option ?? 'plain');
+      if (option === 'block_recipient' || option === 'block_org') {
+        await saveRule({ scope: option === 'block_org' ? 'partner' : id, kind: 'block', data: { sender: m.fromAddress, comment: `Blocked via delete (${m.subject})` } });
+      }
+      // remove from the local store so it leaves the quarantine list
+      emailStore.messages.delete(mid); emailStore.analyses.delete(mid);
+      if (dbEnabled()) { await import('./db/db').then(d => d.q('delete from messages where id=$1', [mid])); }
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Download the stored message as a simple .eml-style text.
+  api.get('/customers/:id/messages/:mid/download', requireAuth, requireCustomerAccess, (req, res) => {
     const m = emailStore.messages.get(req.params.mid);
     if (!m) return res.status(404).json({ error: 'not found' });
-    const r = emailStore.createReleaseRequest(req.params.id, req.params.mid, 'admin');
-    res.json({ ok: true, request: r });
+    const eml = `From: ${m.fromDisplay} <${m.fromAddress}>\nTo: ${m.to}\nSubject: ${m.subject}\nDate: ${m.receivedAt}\n\n${m.bodyText ?? ''}`;
+    res.set('content-type', 'message/rfc822').set('content-disposition', `attachment; filename="message.eml"`).send(eml);
   });
 
   api.get('/customers/:id/users', (req, res) => {
