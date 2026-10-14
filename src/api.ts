@@ -67,7 +67,7 @@ function customerSummary(c: Customer) {
 
 export function buildApi() {
   const api = express.Router();
-  api.use(express.json());
+  api.use(express.json({ limit: '4mb' })); // settings can include a base64 logo
   api.use(attachSession);
   api.use(requireAuth);                              // every API call needs a session
   api.use('/customers/:id', requireCustomerAccess); // per-customer scope check
