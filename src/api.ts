@@ -15,6 +15,7 @@ import { ingestTenantMail } from './emailsec/mailIngest';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
 import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf } from './auth/middleware';
 import { getSettings, saveSettings } from './settings';
+import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
 import { buildInfo, updateStatus } from './version';
@@ -71,6 +72,49 @@ export function buildApi() {
   api.use(attachSession);
   api.use(requireAuth);                              // every API call needs a session
   api.use('/customers/:id', requireCustomerAccess); // per-customer scope check
+
+  // ---- Policy (templates + rules) ----
+  // A partner sees/edits partner (global) scope. A customer sees global + its own,
+  // and may only edit its own.
+  function policyScopes(req: any): { scopes: string[]; own: string } {
+    const s = sessionOf(req)!;
+    if (s.role === 'partner_admin') return { scopes: ['partner'], own: 'partner' };
+    return { scopes: ['partner', s.customerId!], own: s.customerId! };
+  }
+  api.get('/policy/templates', requireAuth, (req, res) => {
+    const { scopes } = policyScopes(req);
+    res.json({ templates: listTemplates(scopes).map(t => ({ ...t, editable: t.scope === policyScopes(req).own })) });
+  });
+  api.post('/policy/templates', requireAuth, async (req, res) => {
+    try { const { own } = policyScopes(req); const t = await saveTemplate({ ...req.body, id: undefined, scope: own }); res.status(201).json(t); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  api.put('/policy/templates/:id', requireAuth, async (req, res) => {
+    try {
+      const { own } = policyScopes(req);
+      const t = await saveTemplate({ ...req.body, id: req.params.id, scope: own });
+      res.json(t);
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  api.delete('/policy/templates/:id', requireAuth, async (req, res) => {
+    await deleteTemplate(req.params.id); res.json({ ok: true });
+  });
+
+  api.get('/policy/rules', requireAuth, (req, res) => {
+    const { scopes, own } = policyScopes(req);
+    res.json({ rules: listRules(scopes, String(req.query.kind ?? '') || undefined).map(r => ({ ...r, editable: r.scope === own })) });
+  });
+  api.post('/policy/rules', requireAuth, async (req, res) => {
+    try { const { own } = policyScopes(req); const r = await saveRule({ ...req.body, id: undefined, scope: own }); res.status(201).json(r); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  api.put('/policy/rules/:id', requireAuth, async (req, res) => {
+    try { const { own } = policyScopes(req); const r = await saveRule({ ...req.body, id: req.params.id, scope: own }); res.json(r); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  api.delete('/policy/rules/:id', requireAuth, async (req, res) => {
+    await deleteRule(req.params.id); res.json({ ok: true });
+  });
 
   // ---- Settings config (partner defaults + per-customer) ----
   // Partner may read/write 'partner' or any customer scope; an administrator

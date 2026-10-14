@@ -14,6 +14,7 @@ import { onboardCustomer, hydrateCustomers, listCustomers } from './onboarding';
 import { hydrateConnections } from './consent';
 import { hydrateDirectory, hydrateEmail } from './db/hydrate';
 import { hydrateSettings } from './settings';
+import { hydratePolicy } from './policy';
 import { buildApi, connectAndSeed } from './api';
 import { buildConsentApp } from './consentServer';
 import { buildAuthApp } from './auth/authServer';
@@ -63,12 +64,14 @@ async function main() {
       const dir = await hydrateDirectory();
       const em = await hydrateEmail();
       const st = await hydrateSettings();
-      console.log(`[db] hydrated ${c} customers, ${n} connections, ${dir.users} users, ${dir.groups} groups, ${em.messages} messages, ${st} settings from Postgres`);
+      const pol = await hydratePolicy();
+      console.log(`[db] hydrated ${c} customers, ${n} connections, ${dir.users} users, ${dir.groups} groups, ${em.messages} messages, ${st} settings, ${pol.templates} policy templates from Postgres`);
     } catch (e) {
       console.error('[db] migration/hydrate failed — check DATABASE_URL:', (e as Error).message);
     }
   } else {
     console.log('[db] DATABASE_URL not set — running in-memory (data resets on restart)');
+    await hydratePolicy(); // seeds base templates in memory
   }
 
   // Only seed demo data when there's nothing already (fresh in-memory run).

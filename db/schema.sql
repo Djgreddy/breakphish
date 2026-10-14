@@ -176,3 +176,28 @@ create table if not exists settings (
   data       jsonb not null default '{}',
   updated_at timestamptz not null default now()
 );
+
+-- ------- policy: templates + rules (partner or customer scope) -------
+create table if not exists policy_templates (
+  id         text primary key,
+  scope      text not null,              -- 'partner' or a customer id
+  name       text not null,
+  comment    text,
+  deployment text,
+  data       jsonb not null default '{}',
+  is_default boolean not null default false,
+  created_by text,
+  created_at timestamptz not null default now()
+);
+create index if not exists policy_templates_scope_idx on policy_templates(scope);
+
+create table if not exists policy_rules (
+  id         text primary key,
+  scope      text not null,
+  kind       text not null,              -- custom|allow|block|dlp|auto_remediation|link_rewrite
+  data       jsonb not null default '{}',
+  enabled    boolean not null default true,
+  created_by text,
+  created_at timestamptz not null default now()
+);
+create index if not exists policy_rules_scope_idx on policy_rules(scope, kind);

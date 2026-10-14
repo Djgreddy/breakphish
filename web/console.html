@@ -243,7 +243,6 @@ function placeholderView(title,desc){
 const PLACEHOLDERS={
   'p-tracker':['Live Email Tracker','Aggregate inbound & outbound mail across all your customers.'],
   'p-team':['Team Members','Manage your MSP staff and their console roles.'],
-  'p-policy':['Policy','Policy templates and rules (allow/block, DLP) applied to customers.'],
   'p-analytics':['Analytics','Executive summaries, verdict trends, and exportable reports.'],
   'p-invoices':['Invoices','Billing and usage invoices across your customers.'],
   'p-audit':['Audit Logs','Every action taken in the console, with actor, resource, and result.'],
@@ -414,18 +413,117 @@ VIEWS.users=async function(){
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
-VIEWS.policy=async function(){
-  const {policy}=await api('/customers/'+STATE.customerId+'/policy');
+/* ---- Policy (templates + rules) ---- */
+const POL_TABS=['Policy Templates','Global Custom Rules','Global Outbound DLP Rules','Global Allow Rules','Global Block Rules','Auto Remediation','Link Rewrite Protection'];
+const POL_KIND={'Global Custom Rules':'custom','Global Outbound DLP Rules':'dlp','Global Allow Rules':'allow','Global Block Rules':'block','Auto Remediation':'auto_remediation','Link Rewrite Protection':'link_rewrite'};
+const TPL_VERDICTS=['Clean','Impersonation','Infomail','Malware','Phishing','Spam-Definite','Spam-High','Spam-Likely'];
+const ACT_OPTS=[['deliver','Deliver'],['quarantine','Quarantine'],['junk','Junk']];
+const DMARC_OPTS=[['sender_dmarc_policy','Sender DMARC Policy (Recommended)'],['quarantine','Quarantine'],['reject','Reject'],['no_action','No Action']];
+const SPFFAIL_OPTS=[['reject','Reject (Recommended)'],['quarantine','Quarantine'],['no_action','No Action']];
+const SPFNONE_OPTS=[['no_action','No Action (Recommended)'],['quarantine','Quarantine']];
+const DEPLOY_OPTS=['BreakPhish 365','BreakPhish Gateway','BreakPhish Unified'];
+let POLTAB=null;
+function pairSelect(val,pairs,on){const s=el('<select style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit"></select>');pairs.forEach(([v2,lbl])=>{const o=document.createElement('option');o.value=v2;o.textContent=lbl;if(v2===val)o.selected=true;s.appendChild(o);});s.onchange=()=>on(s.value);return s;}
+
+VIEWS.policy=policyView; VIEWS['p-policy']=policyView;
+async function policyView(){
+  const isPartner=STATE.role==='partner';
   const v=el('<div></div>');
-  v.appendChild(el(`<div class="ph"><h1>Policy</h1><p>Verdict handling for ${STATE._cust.name}</p></div>`));
-  const card=el('<div class="card"><div class="card-h"><h3>Verdict → disposition</h3></div></div>');
-  const body=el('<div style="padding:6px 18px 14px"></div>');
-  Object.entries(policy).forEach(([vk,disp])=>{
-    body.appendChild(el(`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line2)"><span class="pill ${VERDICT_CLS[vk]}">${VERDICT_LABEL[vk]}</span><div style="flex:1"></div><span class="pill ${DISP_CLS[disp]}">${DISP_LABEL[disp]}</span></div>`));
-  });
-  card.appendChild(body);v.appendChild(card);
+  v.appendChild(el(`<div class="ph"><h1>Policy</h1><p>${isPartner?'Global policies applied to your customers':STATE._cust.name+' · global + your own policies'}</p></div>`));
+  if(!POLTAB||!POL_TABS.includes(POLTAB))POLTAB=POL_TABS[0];
+  const tabBar=el('<div class="tabs" style="flex-wrap:wrap;margin-bottom:16px"></div>');
+  const body=el('<div></div>');
+  const paint=async()=>{body.innerHTML='<div class="loading"><div class="spin"></div></div>';try{const node=await (POLTAB==='Policy Templates'?polTemplates():polRules(POL_KIND[POLTAB],POLTAB));body.innerHTML='';body.appendChild(node);}catch(e){body.innerHTML=`<div class="card p" style="color:var(--danger)">${e.message}</div>`;}};
+  POL_TABS.forEach(t=>{const b=el(`<button class="${POLTAB===t?'on':''}">${t}</button>`);b.onclick=async()=>{POLTAB=t;tabBar.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');await paint();};tabBar.appendChild(b);});
+  v.appendChild(tabBar);v.appendChild(body);await paint();
   return v;
-};
+}
+
+async function polTemplates(){
+  const {templates}=await api('/policy/templates');
+  const v=el('<div></div>');
+  const head=el('<div style="display:flex;margin-bottom:12px"><div style="flex:1"></div></div>');
+  const nb=el('<button class="btn primary sm">+ New template</button>');nb.onclick=()=>openTemplateEditor(null);head.appendChild(nb);v.appendChild(head);
+  const card=el('<div class="card pad0" style="overflow:hidden"></div>');
+  const tbl=el('<table><thead><tr><th>Name</th><th>Deployment</th><th>Default</th><th>Scope</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
+  const tb=tbl.querySelector('tbody');
+  if(!templates.length)tb.appendChild(el('<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--faint)">No templates.</td></tr>'));
+  templates.forEach(t=>{
+    const row=el(`<tr><td style="font-weight:600">${t.name}</td><td style="color:var(--muted)">${t.deployment||'—'}</td><td>${t.isDefault?'<span class="pill p-ok">Default</span>':''}</td><td><span class="pill p-muted">${t.scope==='partner'?'Global':'Customer'}</span></td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+    const act=row.children[4];
+    const ed=el(`<button class="btn sm">${t.editable?'Edit':'View'}</button>`);ed.onclick=()=>openTemplateEditor(t);act.appendChild(ed);
+    if(t.editable){const del=el('<button class="btn sm" style="margin-left:6px;color:var(--danger)">✕</button>');del.onclick=async()=>{if(!confirm('Delete template '+t.name+'?'))return;await api('/policy/templates/'+t.id,{method:'DELETE'});POLTAB='Policy Templates';go(STATE.role==='partner'?'p-policy':'policy');};act.appendChild(del);}
+    tb.appendChild(row);
+  });
+  card.appendChild(tbl);v.appendChild(card);return v;
+}
+
+function openTemplateEditor(t){
+  const isNew=!t; const editable=isNew||t.editable;
+  const d=t?structuredClone(t.data):{verdictActions:{Clean:'deliver',Impersonation:'quarantine',Infomail:'quarantine',Malware:'quarantine',Phishing:'quarantine','Spam-Definite':'quarantine','Spam-High':'quarantine','Spam-Likely':'quarantine'},authActions:{dmarcFail:'sender_dmarc_policy',spfFail:'reject',spfNone:'no_action'},attachments:{types:['Executable'],action:'quarantine'},geo:{countries:[],action:'quarantine'},advanced:{coldOutreach:false,zeroTrust:false,spamSensitivity:'Medium'}};
+  const model={name:t?t.name:'',comment:t?t.comment:'',deployment:t?t.deployment:'BreakPhish 365',data:d,isDefault:t?t.isDefault:false};
+  const modal=el(`<div class="modal wide" style="max-width:760px"><div class="modal-h"><h2>${isNew?'New template':(editable?'Edit template':'View template')}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="tb" style="max-height:70vh;overflow:auto"></div></div>`);
+  showModal(modal);const b=modal.querySelector('#tb');
+  const sec=(t)=>el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px">${t}</div>`);
+  b.appendChild(sField('Template name',sInput(model.name,v=>model.name=v)));
+  b.appendChild(sField('Comment',(()=>{const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;min-height:50px"></textarea>');ta.value=model.comment;ta.oninput=()=>model.comment=ta.value;return ta;})()));
+  b.appendChild(sField('Deployment',sSelect(model.deployment,DEPLOY_OPTS,v=>model.deployment=v)));
+  b.appendChild(sec('Email verdict → action'));
+  TPL_VERDICTS.forEach(vk=>{const r=el(`<div style="display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:500">${vk}</div></div>`);r.appendChild(pairSelect(model.data.verdictActions[vk]||'quarantine',ACT_OPTS,v=>model.data.verdictActions[vk]=v));b.appendChild(r);});
+  b.appendChild(sec('Authentication'));
+  const au=(label,val,opts,on)=>{const r=el(`<div style="display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:500">${label}</div></div>`);r.appendChild(pairSelect(val,opts,on));b.appendChild(r);};
+  au('DMARC-Fail',model.data.authActions.dmarcFail,DMARC_OPTS,v=>model.data.authActions.dmarcFail=v);
+  au('SPF-Fail',model.data.authActions.spfFail,SPFFAIL_OPTS,v=>model.data.authActions.spfFail=v);
+  au('SPF-None',model.data.authActions.spfNone,SPFNONE_OPTS,v=>model.data.authActions.spfNone=v);
+  b.appendChild(sec('Attachments'));
+  b.appendChild(el('<div style="font-size:12px;color:var(--faint);margin-bottom:8px">Action for executable attachments. (Enforced for executables; other types stored.)</div>'));
+  au('Executable action',model.data.attachments.action,ACT_OPTS,v=>model.data.attachments.action=v);
+  b.appendChild(sec('Geo filter (stored — enforcement follow-up)'));
+  au('Geo action',model.data.geo.action,ACT_OPTS,v=>model.data.geo.action=v);
+  b.appendChild(sec('Advanced'));
+  const adv=(label,on,set)=>{const r=el(`<div style="display:flex;align-items:center;gap:14px;padding:8px 0"><div style="flex:1;font-size:13.5px;font-weight:500">${label}</div></div>`);const tg=makeToggle(on);tg.onclick=(()=>{const o=tg.onclick;return()=>{o&&o();set(tg._get());};})();r.appendChild(tg);b.appendChild(r);};
+  adv('Cold Outreach',model.data.advanced.coldOutreach,v=>model.data.advanced.coldOutreach=v);
+  adv('Zero Trust',model.data.advanced.zeroTrust,v=>model.data.advanced.zeroTrust=v);
+  b.appendChild(sField('Spam filtering sensitivity',sSelect(model.data.advanced.spamSensitivity,['Low','Medium','High'],v=>model.data.advanced.spamSensitivity=v)));
+  const defRow=el('<div style="display:flex;align-items:center;gap:14px;padding:10px 0"><div style="flex:1;font-size:13.5px;font-weight:500">Set as default (applied to new mail for this scope)</div></div>');const dtg=makeToggle(model.isDefault);dtg.onclick=(()=>{const o=dtg.onclick;return()=>{o&&o();model.isDefault=dtg._get();};})();defRow.appendChild(dtg);b.appendChild(defRow);
+  const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)"></div>');
+  foot.appendChild(el('<button class="btn" onclick="closeModal()">Cancel</button>'));
+  if(editable){const sv=el('<button class="btn primary">Submit</button>');sv.onclick=async()=>{if(!model.name){toast('Name required');return;}try{await api('/policy/templates'+(isNew?'':'/'+t.id),{method:isNew?'POST':'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(model)});closeModal();toast('Template saved');POLTAB='Policy Templates';go(STATE.role==='partner'?'p-policy':'policy');}catch(e){toast('Save failed: '+e.message);}};foot.appendChild(sv);}
+  b.appendChild(foot);
+}
+
+async function polRules(kind,title){
+  const {rules}=await api('/policy/rules?kind='+kind);
+  const v=el('<div></div>');
+  const soft=['dlp','auto_remediation','link_rewrite'].includes(kind);
+  if(soft)v.appendChild(el(`<div class="card p" style="margin-bottom:12px;font-size:12.5px;color:var(--muted)"><b style="color:var(--txt)">Note:</b> ${title} rules are stored and managed here; active enforcement is a follow-up.</div>`));
+  const head=el('<div style="display:flex;margin-bottom:12px"><div style="flex:1"></div></div>');
+  const nb=el('<button class="btn primary sm">+ New rule</button>');nb.onclick=()=>openRuleEditor(kind,title,null);head.appendChild(nb);v.appendChild(head);
+  const card=el('<div class="card pad0" style="overflow:hidden"></div>');
+  const tbl=el('<table><thead><tr><th>Comment</th><th>Senders / match</th><th>Action</th><th>Scope</th><th>Created</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
+  const tb=tbl.querySelector('tbody');
+  if(!rules.length)tb.appendChild(el('<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--faint)">No results.</td></tr>'));
+  rules.forEach(r=>{
+    const actLbl=kind==='allow'?'Allow (Deliver)':kind==='block'?'Block (Quarantine)':(r.data.action||'—');
+    const row=el(`<tr><td>${r.data.comment||'—'}</td><td style="color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(r.data.senders||[]).join(', ')||'—'}</td><td><span class="pill p-muted">${actLbl}</span></td><td><span class="pill p-muted">${r.scope==='partner'?'Global':'Customer'}</span></td><td class="mono" style="color:var(--muted)">${new Date(r.createdAt).toLocaleDateString()}</td><td style="text-align:right"></td></tr>`);
+    const act=row.children[5];
+    if(r.editable){const del=el('<button class="btn sm" style="color:var(--danger)">✕</button>');del.onclick=async()=>{if(!confirm('Delete rule?'))return;await api('/policy/rules/'+r.id,{method:'DELETE'});go(STATE.role==='partner'?'p-policy':'policy');};act.appendChild(del);}
+    tb.appendChild(row);
+  });
+  card.appendChild(tbl);v.appendChild(card);return v;
+}
+function openRuleEditor(kind,title,r){
+  const model={comment:'',senders:'',action:'quarantine'};
+  const needsAction=['custom','dlp'].includes(kind);
+  const modal=el(`<div class="modal"><div class="modal-h"><h2>New ${title} rule</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="rb"></div></div>`);
+  showModal(modal);const b=modal.querySelector('#rb');
+  b.appendChild(sField('Comment',sInput(model.comment,v=>model.comment=v,'Description')));
+  b.appendChild(sField('Senders / domains (one per line)',(()=>{const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;min-height:70px" placeholder="example.com\\nuser@example.com"></textarea>');ta.oninput=()=>model.senders=ta.value;return ta;})()));
+  if(needsAction)b.appendChild(sField('Action',pairSelect(model.action,ACT_OPTS,v=>model.action=v)));
+  const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn" onclick="closeModal()">Cancel</button></div>');
+  const sv=el('<button class="btn primary">Create</button>');sv.onclick=async()=>{const senders=model.senders.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);try{await api('/policy/rules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,data:{comment:model.comment,senders,action:needsAction?model.action:undefined}})});closeModal();toast('Rule created');go(STATE.role==='partner'?'p-policy':'policy');}catch(e){toast('Failed: '+e.message);}};
+  foot.appendChild(sv);b.appendChild(foot);
+}
 
 /* ---- Settings (tabbed; partner defaults or customer scope) ---- */
 let SET=null, SETSCOPE=null;

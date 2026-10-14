@@ -6,7 +6,7 @@
 import type { Message, Analysis, Signal, Verdict } from './types';
 import { runStaticScorers } from './scorers';
 import { makeClassifier } from './classifier';
-import { policyFor } from './policy';
+import { dispositionFor } from '../policy';
 import { emailStore } from './store';
 import { persistScored } from '../db/hydrate';
 
@@ -61,18 +61,19 @@ export async function analyze(message: Message): Promise<Analysis> {
   const scores = aggregate(signals);
   const { verdict, confidence } = decideVerdict(scores);
 
-  const policy = policyFor(message.tenantId);
-  const disposition = policy.dispositions[verdict];
-  // In the API model detection is post-delivery, so quarantining a threat is a
-  // clawback of an already-delivered message.
-  const remediated = policy.remediateOn.includes(verdict) && disposition === 'quarantine';
+  // Disposition comes from the active policy (customer template → partner default
+  // → built-in), with allow/block lists and auth-fail overrides applied.
+  const act = dispositionFor(message.tenantId, verdict, message);
+  const isThreat = ['phishing', 'malware', 'impersonation', 'policy_geo'].includes(verdict);
+  const remediated = isThreat && act === 'quarantine'; // post-delivery clawback
+  const disposition = remediated ? 'remediated' : act;
 
   const analysis: Analysis = {
     messageId: message.id,
     tenantId: message.tenantId,
     verdict,
     confidence: Math.round(confidence * 100) / 100,
-    disposition: remediated ? 'remediated' : disposition,
+    disposition,
     remediated,
     signals,
   };
