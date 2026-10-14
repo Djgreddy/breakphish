@@ -417,12 +417,21 @@ VIEWS.users=async function(){
 const POL_TABS=['Policy Templates','Global Custom Rules','Global Outbound DLP Rules','Global Allow Rules','Global Block Rules','Auto Remediation','Link Rewrite Protection'];
 const POL_KIND={'Global Custom Rules':'custom','Global Outbound DLP Rules':'dlp','Global Allow Rules':'allow','Global Block Rules':'block','Auto Remediation':'auto_remediation','Link Rewrite Protection':'link_rewrite'};
 const TPL_VERDICTS=['Clean','Impersonation','Infomail','Malware','Phishing','Spam-Definite','Spam-High','Spam-Likely'];
-const ACT_OPTS=[['deliver','Deliver'],['quarantine','Quarantine'],['junk','Junk']];
+const ACT_BASE=[['deliver','Deliver'],['junk','Junk In Outlook'],['junk_banner','Junk In Outlook + Banner'],['quarantine','Quarantine']];
+const REC_VERDICT={Clean:'deliver',Impersonation:'junk_banner',Infomail:'junk',Malware:'quarantine',Phishing:'quarantine','Spam-Definite':'junk','Spam-High':'junk','Spam-Likely':'junk'};
+// Build action options for a verdict, tagging its recommended one.
+function actOpts(rec){return ACT_BASE.map(([v,l])=>[v, v===rec?l+' (Recommended)':l]);}
+const ACT_OPTS=ACT_BASE; // generic (for attachments/geo/custom), with quarantine recommended tag added where used
+const ATT_TYPES=['Executable','Encrypted','Video','Audio','Zip/Compressed','Macros','HTML'];
+const GEO_REGIONS=['Asia','Europe','Africa','Oceania','Americas','Antarctica'];
+const EXCLUDE_VERDICT_OPTS=['Clean','Impersonation','Infomail','Malware','Phishing','Spam-Definite','Spam-High','Spam-Likely'];
 const DMARC_OPTS=[['sender_dmarc_policy','Sender DMARC Policy (Recommended)'],['quarantine','Quarantine'],['reject','Reject'],['no_action','No Action']];
 const SPFFAIL_OPTS=[['reject','Reject (Recommended)'],['quarantine','Quarantine'],['no_action','No Action']];
 const SPFNONE_OPTS=[['no_action','No Action (Recommended)'],['quarantine','Quarantine']];
 const DEPLOY_OPTS=['BreakPhish 365','BreakPhish Gateway','BreakPhish Unified'];
 let POLTAB=null;
+// checkbox group → selected array
+function chipGroup(options,selected,on){const w=el('<div style="display:flex;flex-wrap:wrap"></div>');options.forEach(o=>{w.appendChild(sCheck(o,selected.includes(o),ck=>{if(ck){if(!selected.includes(o))selected.push(o);}else{const i=selected.indexOf(o);if(i>=0)selected.splice(i,1);}on&&on(selected);}));});return w;}
 function pairSelect(val,pairs,on){const s=el('<select style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit"></select>');pairs.forEach(([v2,lbl])=>{const o=document.createElement('option');o.value=v2;o.textContent=lbl;if(v2===val)o.selected=true;s.appendChild(o);});s.onchange=()=>on(s.value);return s;}
 
 VIEWS.policy=policyView; VIEWS['p-policy']=policyView;
@@ -433,7 +442,7 @@ async function policyView(){
   if(!POLTAB||!POL_TABS.includes(POLTAB))POLTAB=POL_TABS[0];
   const tabBar=el('<div class="tabs" style="flex-wrap:wrap;margin-bottom:16px"></div>');
   const body=el('<div></div>');
-  const paint=async()=>{body.innerHTML='<div class="loading"><div class="spin"></div></div>';try{const node=await (POLTAB==='Policy Templates'?polTemplates():polRules(POL_KIND[POLTAB],POLTAB));body.innerHTML='';body.appendChild(node);}catch(e){body.innerHTML=`<div class="card p" style="color:var(--danger)">${e.message}</div>`;}};
+  const paint=async()=>{body.innerHTML='<div class="loading"><div class="spin"></div></div>';try{let node;if(POLTAB==='Policy Templates')node=await polTemplates();else if(POLTAB==='Auto Remediation')node=await autoRemediationView();else node=await polRules(POL_KIND[POLTAB],POLTAB);body.innerHTML='';body.appendChild(node);}catch(e){body.innerHTML=`<div class="card p" style="color:var(--danger)">${e.message}</div>`;}};
   POL_TABS.forEach(t=>{const b=el(`<button class="${POLTAB===t?'on':''}">${t}</button>`);b.onclick=async()=>{POLTAB=t;tabBar.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');await paint();};tabBar.appendChild(b);});
   v.appendChild(tabBar);v.appendChild(body);await paint();
   return v;
@@ -468,18 +477,25 @@ function openTemplateEditor(t){
   b.appendChild(sField('Template name',sInput(model.name,v=>model.name=v)));
   b.appendChild(sField('Comment',(()=>{const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;min-height:50px"></textarea>');ta.value=model.comment;ta.oninput=()=>model.comment=ta.value;return ta;})()));
   b.appendChild(sField('Deployment',sSelect(model.deployment,DEPLOY_OPTS,v=>model.deployment=v)));
-  b.appendChild(sec('Email verdict → action'));
-  TPL_VERDICTS.forEach(vk=>{const r=el(`<div style="display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:500">${vk}</div></div>`);r.appendChild(pairSelect(model.data.verdictActions[vk]||'quarantine',ACT_OPTS,v=>model.data.verdictActions[vk]=v));b.appendChild(r);});
+  b.appendChild(el('<div style="display:grid;grid-template-columns:150px 1fr;gap:12px;margin:6px 0 2px"><div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">Email verdict</div><div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">Action</div></div>'));
+  TPL_VERDICTS.forEach(vk=>{const r=el(`<div style="display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:500">${vk}</div></div>`);r.appendChild(pairSelect(model.data.verdictActions[vk]||REC_VERDICT[vk],actOpts(REC_VERDICT[vk]),v=>model.data.verdictActions[vk]=v));b.appendChild(r);});
   b.appendChild(sec('Authentication'));
   const au=(label,val,opts,on)=>{const r=el(`<div style="display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:500">${label}</div></div>`);r.appendChild(pairSelect(val,opts,on));b.appendChild(r);};
   au('DMARC-Fail',model.data.authActions.dmarcFail,DMARC_OPTS,v=>model.data.authActions.dmarcFail=v);
   au('SPF-Fail',model.data.authActions.spfFail,SPFFAIL_OPTS,v=>model.data.authActions.spfFail=v);
   au('SPF-None',model.data.authActions.spfNone,SPFNONE_OPTS,v=>model.data.authActions.spfNone=v);
   b.appendChild(sec('Attachments'));
-  b.appendChild(el('<div style="font-size:12px;color:var(--faint);margin-bottom:8px">Action for executable attachments. (Enforced for executables; other types stored.)</div>'));
-  au('Executable action',model.data.attachments.action,ACT_OPTS,v=>model.data.attachments.action=v);
+  b.appendChild(el('<div style="font-size:12px;color:var(--faint);margin-bottom:8px">Quarantine, junk or banner mail with selected attachment types. (Executable is enforced; other types stored.)</div>'));
+  if(!Array.isArray(model.data.attachments.types))model.data.attachments.types=['Executable'];
+  const attField=el('<div class="field"><label>Type</label></div>');attField.appendChild(chipGroup(ATT_TYPES,model.data.attachments.types));b.appendChild(attField);
+  au('Action',model.data.attachments.action,actOpts('quarantine'),v=>model.data.attachments.action=v);
+  if(model.data.attachments.bypassInternalBanned===undefined)model.data.attachments.bypassInternalBanned=false;
+  const bir=el('<div style="display:flex;align-items:center;gap:14px;padding:8px 0"><div style="flex:1;font-size:13.5px;font-weight:500">Bypass Internal Banned Attachments</div></div>');const bt=makeToggle(model.data.attachments.bypassInternalBanned);bt.onclick=(()=>{const o=bt.onclick;return()=>{o&&o();model.data.attachments.bypassInternalBanned=bt._get();};})();bir.appendChild(bt);b.appendChild(bir);
   b.appendChild(sec('Geo filter (stored — enforcement follow-up)'));
-  au('Geo action',model.data.geo.action,ACT_OPTS,v=>model.data.geo.action=v);
+  b.appendChild(el('<div style="font-size:12px;color:var(--faint);margin-bottom:8px">Quarantine, junk or banner mail from selected countries/regions.</div>'));
+  if(!Array.isArray(model.data.geo.countries))model.data.geo.countries=[];
+  const geoField=el('<div class="field"><label>Regions</label></div>');geoField.appendChild(chipGroup(GEO_REGIONS,model.data.geo.countries));b.appendChild(geoField);
+  au('Action',model.data.geo.action,actOpts('quarantine'),v=>model.data.geo.action=v);
   b.appendChild(sec('Advanced'));
   const adv=(label,on,set)=>{const r=el(`<div style="display:flex;align-items:center;gap:14px;padding:8px 0"><div style="flex:1;font-size:13.5px;font-weight:500">${label}</div></div>`);const tg=makeToggle(on);tg.onclick=(()=>{const o=tg.onclick;return()=>{o&&o();set(tg._get());};})();r.appendChild(tg);b.appendChild(r);};
   adv('Cold Outreach',model.data.advanced.coldOutreach,v=>model.data.advanced.coldOutreach=v);
@@ -512,17 +528,75 @@ async function polRules(kind,title){
   });
   card.appendChild(tbl);v.appendChild(card);return v;
 }
+// multi-line text field returning array
+function linesField(label,hint,ph,set){const w=el(`<div class="field"><label>${label}</label></div>`);const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;min-height:60px"></textarea>');ta.placeholder=ph||'';ta.oninput=()=>set(ta.value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean));w.appendChild(ta);if(hint)w.appendChild(el(`<div style="font-size:11px;color:var(--faint);margin-top:4px">${hint}</div>`));return w;}
+function toggleField(label,desc,on,set){const r=el(`<div style="display:flex;align-items:center;gap:14px;padding:10px 0"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">${label}</div>${desc?`<div style="font-size:11.5px;color:var(--faint)">${desc}</div>`:''}</div></div>`);const t=makeToggle(on);t.onclick=(()=>{const o=t.onclick;return()=>{o&&o();set(t._get());};})();r.appendChild(t);return r;}
+
 function openRuleEditor(kind,title,r){
-  const model={comment:'',senders:'',action:'quarantine'};
-  const needsAction=['custom','dlp'].includes(kind);
-  const modal=el(`<div class="modal"><div class="modal-h"><h2>New ${title} rule</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="rb"></div></div>`);
+  const m={comment:'',active:true,edge:false,setExpire:false,expireDate:'',sender:'',senders:[],ip:[],subjects:[],urls:[],headers:[],attachmentTypes:[],bodyRules:[],excludeVerdicts:[],allowBypass:[],action:'quarantine',preference:0,applyToAll:false,name:'',suspiciousAction:'Warn',maliciousAction:'Block',excludedUrls:[]};
+  const modal=el(`<div class="modal" style="max-width:720px"><div class="modal-h"><h2>New ${kind==='link_rewrite'?'Link Rewrite Protection Template':title+' rule'}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="rb" style="max-height:72vh;overflow:auto"></div></div>`);
   showModal(modal);const b=modal.querySelector('#rb');
-  b.appendChild(sField('Comment',sInput(model.comment,v=>model.comment=v,'Description')));
-  b.appendChild(sField('Senders / domains (one per line)',(()=>{const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;min-height:70px" placeholder="example.com\\nuser@example.com"></textarea>');ta.oninput=()=>model.senders=ta.value;return ta;})()));
-  if(needsAction)b.appendChild(sField('Action',pairSelect(model.action,ACT_OPTS,v=>model.action=v)));
-  const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn" onclick="closeModal()">Cancel</button></div>');
-  const sv=el('<button class="btn primary">Create</button>');sv.onclick=async()=>{const senders=model.senders.split(/[\n,]/).map(x=>x.trim()).filter(Boolean);try{await api('/policy/rules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,data:{comment:model.comment,senders,action:needsAction?model.action:undefined}})});closeModal();toast('Rule created');go(STATE.role==='partner'?'p-policy':'policy');}catch(e){toast('Failed: '+e.message);}};
+  const sec=(t)=>el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">${t}</div>`);
+
+  if(kind==='allow'){
+    const by=el('<div class="field"><label>Allow Rules Bypass</label></div>');by.appendChild(chipGroup(['Spam','Infomail','Impersonation','Policy-Geo'],m.allowBypass));b.appendChild(by);
+  }
+  if(kind==='link_rewrite'){
+    b.appendChild(sField('Name',sInput(m.name,v=>m.name=v,'e.g. Default Link Rewrite Protection')));
+    b.appendChild(toggleField('Active','',true,v=>m.active=v));
+    b.appendChild(sField('Suspicious link action',sSelect(m.suspiciousAction,['Warn','Block','Allow'],v=>m.suspiciousAction=v)));
+    b.appendChild(sField('Malicious link action',sSelect(m.maliciousAction,['Block','Warn','Allow'],v=>m.maliciousAction=v)));
+    b.appendChild(linesField('Excluded URLs','One per line (max 100). These will not be rewritten.','',v=>m.excludedUrls=v));
+  } else {
+    // common scope controls (partner only)
+    if(STATE.role==='partner'){b.appendChild(toggleField('Select All Customers','',false,v=>m.applyToAll=v));b.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin:-6px 0 8px">Leave off to apply globally; per-customer targeting coming next.</div>'));}
+    if(kind==='allow'||kind==='block'){
+      b.appendChild(toggleField('Active','',true,v=>m.active=v));
+      b.appendChild(toggleField('Edge',kind==='block'?'Reject connections from sender (can take up to 1 hour).':'Bypass rejected statuses (can take up to 1 hour).',false,v=>m.edge=v));
+      b.appendChild(toggleField('Set Expire Date','',false,v=>m.setExpire=v));
+      b.appendChild(sField('Expire date',sInput(m.expireDate,v=>m.expireDate=v,'YYYY-MM-DD HH:mm')));
+      b.appendChild(sField('Sender',sInput(m.sender,v=>m.sender=v,'sender email or domain (wildcards: *.name.tld)')));
+      b.appendChild(sField('Comment',sInput(m.comment,v=>m.comment=v,'Description')));
+    }
+    if(kind==='custom'||kind==='dlp'){
+      b.appendChild(sec('Rule options'));
+      if(kind==='custom'){b.appendChild(linesField('Senders','Email or domain; wildcards *.name.tld','',v=>m.senders=v));b.appendChild(linesField('IP','One per line; CIDR allowed e.g. x.x.x.0/24','',v=>m.ip=v));}
+      b.appendChild(linesField('Subjects','Wildcards allowed with *','',v=>m.subjects=v));
+      b.appendChild(linesField('URLs','Wildcards allowed with *','',v=>m.urls=v));
+      b.appendChild(linesField('Headers','Key:Value e.g. X-MS-Test:12345','',v=>m.headers=v));
+      b.appendChild(linesField('Attachment types','Exclude leading dot, e.g. zip','',v=>m.attachmentTypes=v));
+      b.appendChild(linesField('Body rules','Wildcards allowed with *','',v=>m.bodyRules=v));
+      if(kind==='custom'){const ev=el('<div class="field"><label>Exclude verdicts</label></div>');ev.appendChild(chipGroup(EXCLUDE_VERDICT_OPTS,m.excludeVerdicts));b.appendChild(ev);}
+      b.appendChild(sField('Action',pairSelect(m.action,actOpts('quarantine'),v=>m.action=v)));
+      b.appendChild(sField('Preference (1=highest … 10)',sInput(String(m.preference),v=>m.preference=Number(v)||0,'0')));
+      if(kind==='dlp')b.appendChild(sField('Comment',sInput(m.comment,v=>m.comment=v,'Description')));
+      if(kind==='custom')b.appendChild(toggleField('Edge','Edge rules can take up to 1 hour to apply.',false,v=>m.edge=v));
+    }
+  }
+  const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Cancel</button></div>');
+  const sv=el('<button class="btn primary">Submit</button>');
+  sv.onclick=async()=>{
+    try{await api('/policy/rules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,data:m})});closeModal();toast('Saved');go(STATE.role==='partner'?'p-policy':'policy');}
+    catch(e){toast('Failed: '+e.message);}
+  };
   foot.appendChild(sv);b.appendChild(foot);
+}
+
+async function autoRemediationView(){
+  const {rules}=await api('/policy/rules?kind=auto_remediation');
+  const cur=rules[0]?.data||{mode:'off',notifyTo:'Administrator'};
+  const id=rules[0]?.id;
+  const v=el('<div class="card p" style="max-width:640px"></div>');
+  v.appendChild(el('<div style="font-size:13px;color:var(--muted);margin-bottom:16px">Automatically act on retrospective threats found in already-delivered mail. <b style="color:var(--txt)">Stored now; active remediation is a follow-up.</b></div>'));
+  const seg=el('<div class="field"><label>Auto Remediation</label></div>');
+  const segBar=el('<div class="seg" style="display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:3px"></div>');
+  const modes=[['off','Off'],['notify','Notify Only'],['auto','Auto Remediate']];
+  modes.forEach(([val,lbl])=>{const btn=el(`<button style="padding:7px 14px;border:none;background:${cur.mode===val?'var(--brand)':'none'};color:${cur.mode===val?'#fff':'var(--muted)'};border-radius:7px;font-size:12.5px;font-weight:600">${lbl}</button>`);btn.onclick=()=>{cur.mode=val;segBar.querySelectorAll('button').forEach(x=>{x.style.background='none';x.style.color='var(--muted)';});btn.style.background='var(--brand)';btn.style.color='#fff';};segBar.appendChild(btn);});
+  seg.appendChild(segBar);v.appendChild(seg);
+  v.appendChild(sField('Send notifications to',sSelect(cur.notifyTo,['Administrator','Partner'],val=>cur.notifyTo=val)));
+  const sv=el('<button class="btn primary" style="margin-top:12px">Save</button>');
+  sv.onclick=async()=>{try{await api('/policy/rules'+(id?'/'+id:''),{method:id?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:'auto_remediation',data:cur})});toast('Saved');}catch(e){toast('Failed: '+e.message);}};
+  v.appendChild(sv);return v;
 }
 
 /* ---- Settings (tabbed; partner defaults or customer scope) ---- */

@@ -13,7 +13,7 @@
 import { randomUUID } from 'node:crypto';
 import { dbEnabled, q } from './db/db';
 
-export type Action = 'deliver' | 'junk' | 'quarantine';
+export type Action = 'deliver' | 'junk' | 'junk_banner' | 'quarantine';
 export type AuthAction = 'no_action' | 'quarantine' | 'reject' | 'sender_dmarc_policy';
 
 // Template verdict keys as shown in the editor.
@@ -37,8 +37,8 @@ export interface PolicyRule {
 
 export const DEFAULT_TEMPLATE_DATA: PolicyTemplateData = {
   verdictActions: {
-    'Clean': 'deliver', 'Impersonation': 'quarantine', 'Infomail': 'quarantine', 'Malware': 'quarantine',
-    'Phishing': 'quarantine', 'Spam-Definite': 'quarantine', 'Spam-High': 'quarantine', 'Spam-Likely': 'quarantine',
+    'Clean': 'deliver', 'Impersonation': 'junk_banner', 'Infomail': 'junk', 'Malware': 'quarantine',
+    'Phishing': 'quarantine', 'Spam-Definite': 'junk', 'Spam-High': 'junk', 'Spam-Likely': 'junk',
   },
   authActions: { dmarcFail: 'sender_dmarc_policy', spfFail: 'reject', spfNone: 'no_action' },
   attachments: { types: ['Executable'], action: 'quarantine' },
@@ -55,8 +55,10 @@ const VERDICT_KEY: Record<string, string> = {
   malware: 'Malware', phishing: 'Phishing', spam: 'Spam-Definite', spam_likely: 'Spam-Likely',
 };
 
-const rank: Record<Action, number> = { deliver: 0, junk: 1, quarantine: 2 };
+const rank: Record<Action, number> = { deliver: 0, junk: 1, junk_banner: 1, quarantine: 2 };
 const stricter = (a: Action, b: Action): Action => (rank[a] >= rank[b] ? a : b);
+// Disposition layer only knows deliver|junk|quarantine; banner is a follow-up.
+const toDisposition = (a: Action): 'deliver' | 'junk' | 'quarantine' => (a === 'junk_banner' ? 'junk' : a);
 
 /* ---------------- CRUD ---------------- */
 export function listTemplates(scopes: string[]): PolicyTemplate[] {
@@ -121,9 +123,11 @@ export function resolveTemplate(tenantId: string): PolicyTemplateData {
 
 function matchesSender(rule: PolicyRule, fromAddress: string): boolean {
   const dom = fromAddress.split('@')[1] ?? '';
-  return (rule.data.senders ?? []).some(s => {
-    s = s.toLowerCase().trim(); if (!s) return false;
-    return fromAddress === s || dom === s || dom.endsWith('.' + s) || s === '@' + dom;
+  const list = [...(rule.data.senders ?? []), ...(rule.data.sender ? [rule.data.sender] : [])];
+  return list.some(s => {
+    s = String(s).toLowerCase().trim(); if (!s) return false;
+    const bare = s.startsWith('*.') ? s.slice(2) : s;        // *.name.tld
+    return fromAddress === s || dom === bare || dom.endsWith('.' + bare) || s === '@' + dom;
   });
 }
 // customer rules first (win), then partner.
@@ -143,7 +147,7 @@ const EXEC_EXT = ['.exe','.zip','.iso','.js','.scr','.bat','.cmd','.msi'];
 export function dispositionFor(
   tenantId: string, verdict: string,
   message: { auth: { spf: string; dkim: string; dmarc: string }; attachments?: { filename: string }[]; fromAddress: string },
-): Action {
+): 'deliver' | 'junk' | 'quarantine' {
   // 1. allow/block overrides everything
   const ab = allowBlock(tenantId, message.fromAddress);
   if (ab === 'allow') return 'deliver';
@@ -164,7 +168,7 @@ export function dispositionFor(
   if (tpl.attachments.types.includes('Executable') && (message.attachments ?? []).some(a => EXEC_EXT.includes((a.filename.slice(a.filename.lastIndexOf('.')) || '').toLowerCase())))
     act = stricter(act, tpl.attachments.action);
 
-  return act;
+  return toDisposition(act);
 }
 
 /* ---------------- persistence ---------------- */
