@@ -6,8 +6,9 @@ import { store } from './store';
 import type { Tenant } from './types';
 import type { Product, IntegrationModel } from './emailsec/types';
 import { INTEGRATION_AVAILABILITY } from './emailsec/types';
-import { dbEnabled } from './db/db';
+import { dbEnabled, q } from './db/db';
 import { upsertCustomer, loadCustomers } from './db/persist';
+import { emailStore } from './emailsec/store';
 
 export interface OnboardInput {
   name: string;
@@ -87,6 +88,19 @@ export async function markCustomerConnected(id: string, entraTenantId: string, v
 
 export function getCustomer(id: string) { return customers.get(id); }
 export function listCustomers() { return [...customers.values()]; }
+
+// Offboard a customer: wipe all its in-memory state and, when a DB is present,
+// delete the customer row (which cascades to users, groups, messages, analyses,
+// campaigns, etc.).
+export async function deleteCustomer(id: string): Promise<void> {
+  customers.delete(id);
+  store.tenants.delete(id);
+  for (const [k, u] of store.users) if (u.tenantId === id) store.users.delete(k);
+  for (const [k, g] of store.groups) if (g.tenantId === id) store.groups.delete(k);
+  for (const [k, m] of emailStore.messages) if (m.tenantId === id) emailStore.messages.delete(k);
+  for (const [k, a] of emailStore.analyses) if (a.tenantId === id) emailStore.analyses.delete(k);
+  if (dbEnabled()) await q('delete from customers where id=$1', [id]); // cascades
+}
 
 export function hasProduct(tenantId: string, product: Product): boolean {
   return Boolean(customers.get(tenantId)?.products.includes(product));

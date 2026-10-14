@@ -159,3 +159,9 @@ export async function handleConsentCallback(query: Record<string, string | undef
 export function getConnection(customerId: string): TenantConnection | undefined {
   return connections.get(customerId);
 }
+
+// Remove a connection from memory. The DB row is removed by the customers
+// cascade when the customer is deleted.
+export function deleteConnection(customerId: string): void {
+  connections.delete(customerId);
+}

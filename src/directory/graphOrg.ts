@@ -34,11 +34,14 @@ export class GraphOrgVerifier implements OrgVerifier {
       { headers: { authorization: `Bearer ${token}` } },
     );
     if (!res.ok) throw new Error(`organization read failed ${res.status}: ${await res.text()}`);
-    const json = (await res.json()) as { value: Array<{ displayName: string; verifiedDomains: Array<{ name: string; isVerified: boolean }> }> };
+    const json = (await res.json()) as { value: Array<{ displayName: string; verifiedDomains: Array<{ name: string }> }> };
     const org = json.value[0];
+    // Every entry in Graph's verifiedDomains is already verified — there is no
+    // `isVerified` field to filter on (filtering on it dropped them all, which
+    // left the allowlist empty and filtered out every synced user).
     return {
       displayName: org.displayName,
-      verifiedDomains: org.verifiedDomains.filter(d => d.isVerified).map(d => d.name),
+      verifiedDomains: (org.verifiedDomains ?? []).map(d => d.name),
     };
   }
 }

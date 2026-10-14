@@ -3,8 +3,8 @@
 // reporting. No new business logic lives here.
 
 import express from 'express';
-import { onboardCustomer, getCustomer, listCustomers, type Customer } from './onboarding';
-import { buildConsentUrl, handleConsentCallback, getConnection } from './consent';
+import { onboardCustomer, getCustomer, listCustomers, deleteCustomer, type Customer } from './onboarding';
+import { buildConsentUrl, handleConsentCallback, getConnection, deleteConnection } from './consent';
 import { syncTenant } from './directory/syncService';
 import { store } from './store';
 import { generateRawMessages } from './emailsec/generate';
@@ -134,6 +134,42 @@ export function buildApi() {
       return res.json({ ok: true, ...result });
     } catch (e) {
       return res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // Re-sync a connected tenant's directory + mail on demand (no re-consent).
+  api.post('/customers/:id/resync', requirePartner, async (req, res) => {
+    try {
+      const id = req.params.id;
+      if (!getCustomer(id)) return res.status(404).json({ error: 'not found' });
+      const conn = getConnection(id);
+      if (conn?.status !== 'connected' || !conn.entraTenantId) return res.status(400).json({ error: 'customer is not connected' });
+      // Make sure the tenant has its verified domains (older connections may lack them).
+      if (conn.verifiedDomains?.length) {
+        const t = store.getTenant(id);
+        if (t) { t.entraTenantId = conn.entraTenantId; t.verifiedDomains = conn.verifiedDomains; }
+      }
+      const sync = await syncTenant(id);
+      let scored = 0;
+      if (getCustomer(id)!.products.includes('email_security')) {
+        const r = await ingestTenantMail(id); scored = r.scored;
+      }
+      res.json({ ok: true, users: sync.users, groups: sync.groups, scored });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+
+  // Delete a customer and all its data (offboarding). Partner only.
+  api.delete('/customers/:id', requirePartner, async (req, res) => {
+    try {
+      const id = req.params.id;
+      if (!getCustomer(id)) return res.status(404).json({ error: 'not found' });
+      deleteConnection(id);
+      await deleteCustomer(id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
     }
   });
 

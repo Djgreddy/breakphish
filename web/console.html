@@ -236,13 +236,30 @@ VIEWS.customers=async function(){
       <td class="mono" style="color:${c.threats?'var(--danger)':'var(--muted)'}">${c.connection.status==='connected'?c.threats:'—'}</td>
       <td></td></tr>`);
     const act=row.children[6];
-    if(c.connection.status==='connected'){const b=el('<button class="btn ok sm">Login as →</button>');b.onclick=(e)=>{e.stopPropagation();loginAs(c);};act.appendChild(b);row.onclick=()=>loginAs(c);}
-    else{const b=el('<button class="btn teal sm">Connect Microsoft 365</button>');b.onclick=async(e)=>{e.stopPropagation();b.textContent='Connecting…';b.disabled=true;
-      try{const r=await api('/customers/'+c.id+'/connect',{method:'POST'});
-        if(r.redirect){toast('Opening Microsoft consent…');window.location.href=r.redirect;return;}
-        toast('Connected & synced '+c.name);go('customers');}
-      catch(err){toast('Connect failed: '+err.message);b.textContent='Connect Microsoft 365';b.disabled=false;}
-    };act.appendChild(b);}
+    act.style.whiteSpace='nowrap';
+    if(c.connection.status==='connected'){
+      const b=el('<button class="btn ok sm">Login as →</button>');b.onclick=(e)=>{e.stopPropagation();loginAs(c);};act.appendChild(b);
+      const rs=el('<button class="btn sm" style="margin-left:6px" title="Re-sync users &amp; mail">↻</button>');
+      rs.onclick=async(e)=>{e.stopPropagation();rs.textContent='…';rs.disabled=true;
+        try{const r=await api('/customers/'+c.id+'/resync',{method:'POST'});toast(`Synced ${r.users} users, scored ${r.scored} new`);go('customers');}
+        catch(err){toast('Re-sync failed: '+err.message);rs.textContent='↻';rs.disabled=false;}};
+      act.appendChild(rs);
+      row.onclick=()=>loginAs(c);
+    } else {
+      const b=el('<button class="btn teal sm">Connect Microsoft 365</button>');b.onclick=async(e)=>{e.stopPropagation();b.textContent='Connecting…';b.disabled=true;
+        try{const r=await api('/customers/'+c.id+'/connect',{method:'POST'});
+          if(r.redirect){toast('Opening Microsoft consent…');window.location.href=r.redirect;return;}
+          toast('Connected & synced '+c.name);go('customers');}
+        catch(err){toast('Connect failed: '+err.message);b.textContent='Connect Microsoft 365';b.disabled=false;}
+      };act.appendChild(b);
+    }
+    const del=el('<button class="btn sm" style="margin-left:6px;color:var(--danger)" title="Delete customer">✕</button>');
+    del.onclick=async(e)=>{e.stopPropagation();
+      if(!confirm(`Delete ${c.name}? This removes its users, mail, and all data. This cannot be undone.`))return;
+      del.textContent='…';del.disabled=true;
+      try{await api('/customers/'+c.id,{method:'DELETE'});toast('Deleted '+c.name);go('customers');}
+      catch(err){toast('Delete failed: '+err.message);del.textContent='✕';del.disabled=false;}};
+    act.appendChild(del);
     tb.appendChild(row);
   });
   card.appendChild(tbl);v.appendChild(card);
