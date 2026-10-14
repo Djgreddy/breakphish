@@ -29,7 +29,7 @@ export async function hydrateEmail(): Promise<{ messages: number; analyses: numb
   const msgs = await loadMessages();
   for (const r of msgs) {
     emailStore.saveMessage({
-      id: r.id, tenantId: r.tenant_id, direction: r.direction, source: r.source,
+      id: r.id, internetMessageId: r.internet_message_id ?? undefined, tenantId: r.tenant_id, direction: r.direction, source: r.source,
       fromAddress: r.from_address, fromDisplay: r.from_display, to: r.to_address, subject: r.subject,
       bodyText: r.body_text ?? '', receivedAt: (r.received_at instanceof Date ? r.received_at.toISOString() : r.received_at),
       auth: r.auth ?? { spf: 'none', dkim: 'none', dmarc: 'none' }, replyTo: r.reply_to ?? undefined,

@@ -325,7 +325,7 @@ export function buildApi() {
       // act on the mailbox (graph mode) — find the recipient mailbox id
       const conn = getConnection(id);
       const user = store.usersForTenant(id).find(u => u.email.toLowerCase() === m.to.toLowerCase());
-      if (conn?.entraTenantId && user) await applyDisposition(conn.entraTenantId, user.externalId, mid, 'remediated');
+      if (conn?.entraTenantId && user) await applyDisposition(conn.entraTenantId, user.externalId, { graphId: mid, internetMessageId: m.internetMessageId }, 'remediated');
       // optional block rule
       const option = String(req.body?.option ?? 'plain');
       if (option === 'block_recipient' || option === 'block_org') {
@@ -360,7 +360,7 @@ export function buildApi() {
       a.disposition = 'deliver'; a.remediated = false;
       emailStore.saveAnalysis(a); await persistScored(m, a);
       const { conn, user } = mailboxFor(id, m);
-      if (conn?.entraTenantId && user) { try { await (await import('./emailsec/mailActions')).makeMailActions().moveToInbox(conn.entraTenantId, user.externalId, mid); } catch (e) { console.error('[release] move failed', (e as Error).message); } }
+      if (conn?.entraTenantId && user) { try { await (await import('./emailsec/mailActions')).makeMailActions().moveToInbox(conn.entraTenantId, user.externalId, { graphId: mid, internetMessageId: m.internetMessageId }); } catch (e) { console.error('[release] move failed', (e as Error).message); } }
       const option = String(req.body?.option ?? 'plain');
       if (option === 'allow_recipient' || option === 'allow_org') {
         await saveRule({ scope: option === 'allow_org' ? 'partner' : id, kind: 'allow', data: { sender: m.fromAddress, comment: `Allowed via release (${m.subject})` } });
@@ -376,7 +376,7 @@ export function buildApi() {
       const m = emailStore.messages.get(mid); const a = emailStore.analysisFor(mid);
       if (!m || !a) return res.status(404).json({ error: 'not found' });
       const { conn, user } = mailboxFor(id, m);
-      if (conn?.entraTenantId && user) { try { await (await import('./emailsec/mailActions')).makeMailActions().moveToDeleted(conn.entraTenantId, user.externalId, mid); } catch (e) { console.error('[delete] move failed', (e as Error).message); } }
+      if (conn?.entraTenantId && user) { try { await (await import('./emailsec/mailActions')).makeMailActions().moveToDeleted(conn.entraTenantId, user.externalId, { graphId: mid, internetMessageId: m.internetMessageId }); } catch (e) { console.error('[delete] move failed', (e as Error).message); } }
       const option = String(req.body?.option ?? 'plain');
       if (option === 'block_recipient' || option === 'block_org') {
         await saveRule({ scope: option === 'block_org' ? 'partner' : id, kind: 'block', data: { sender: m.fromAddress, comment: `Blocked via delete (${m.subject})` } });

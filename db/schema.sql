@@ -201,3 +201,6 @@ create table if not exists policy_rules (
   created_at timestamptz not null default now()
 );
 create index if not exists policy_rules_scope_idx on policy_rules(scope, kind);
+
+-- stable RFC message id (survives folder moves; Graph item id does not)
+alter table messages add column if not exists internet_message_id text;

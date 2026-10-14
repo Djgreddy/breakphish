@@ -46,6 +46,7 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
   const bodyText = m.body?.contentType === 'html' ? stripHtml(m.body?.content) : (m.body?.content ?? m.bodyPreview ?? '');
   return {
     id: m.id,
+    internetMessageId: m.internetMessageId,
     tenantId,
     direction: outbound ? 'outbound' : (internalSender ? 'internal' : 'inbound'),
     source,
@@ -70,8 +71,8 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
 // seen before. Returns how many new messages were scored.
 async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, token: string, folder: 'inbox' | 'sentitems', top = 25): Promise<number> {
   const select = folder === 'sentitems'
-    ? 'id,subject,from,sender,toRecipients,sentDateTime,bodyPreview,body,internetMessageHeaders'
-    : 'id,subject,from,toRecipients,replyTo,receivedDateTime,bodyPreview,body,internetMessageHeaders';
+    ? 'id,internetMessageId,subject,from,sender,toRecipients,sentDateTime,bodyPreview,body,internetMessageHeaders'
+    : 'id,internetMessageId,subject,from,toRecipients,replyTo,receivedDateTime,bodyPreview,body,internetMessageHeaders';
   const url =
     `${GRAPH}/users/${encodeURIComponent(userId)}/mailFolders/${folder}/messages` +
     `?$top=${top}&$select=${select}&$expand=attachments($select=name,contentType)`;
@@ -87,7 +88,7 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
     const analysis = await analyze(normalize(tenantId, verifiedDomains, m, folder));
     // Enforce: act on the real mailbox for inbound mail the policy junks/quarantines.
     if (folder === 'inbox' && ['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
-      await applyDisposition(entraTenantId, userId, m.id, analysis.disposition);
+      await applyDisposition(entraTenantId, userId, { graphId: m.id, internetMessageId: m.internetMessageId }, analysis.disposition);
     }
     scored++;
   }

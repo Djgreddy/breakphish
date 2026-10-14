@@ -38,7 +38,8 @@ export interface Attachment {
 
 // A message as handed to the pipeline (what a Graph ingestion would normalize to).
 export interface Message {
-  id: string;
+  id: string;                      // Graph item id (changes when the message moves folders)
+  internetMessageId?: string;      // stable RFC id (use this to re-find the message)
   tenantId: string;
   direction: Direction;
   source: 'external' | 'internal';

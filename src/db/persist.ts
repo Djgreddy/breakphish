@@ -89,12 +89,12 @@ export async function loadGroups(): Promise<any[]> {
 // ---- email: messages + analyses ----
 export async function upsertMessageRow(m: any): Promise<void> {
   await q(
-    `insert into messages (id,tenant_id,direction,source,from_address,from_display,to_address,subject,body_text,received_at,auth,reply_to,sender_domain_age_days,first_time_sender,urls,attachments)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-     on conflict (id) do nothing`,
+    `insert into messages (id,tenant_id,direction,source,from_address,from_display,to_address,subject,body_text,received_at,auth,reply_to,sender_domain_age_days,first_time_sender,urls,attachments,internet_message_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+     on conflict (id) do update set internet_message_id = excluded.internet_message_id`,
     [m.id, m.tenantId, m.direction, m.source, m.fromAddress, m.fromDisplay, m.to, m.subject, m.bodyText ?? '',
      m.receivedAt, JSON.stringify(m.auth ?? {}), m.replyTo ?? null, m.senderDomainAgeDays ?? null,
-     m.firstTimeSender ?? null, m.urls ?? [], JSON.stringify(m.attachments ?? [])],
+     m.firstTimeSender ?? null, m.urls ?? [], JSON.stringify(m.attachments ?? []), m.internetMessageId ?? null],
   );
 }
 export async function loadMessages(): Promise<any[]> {
