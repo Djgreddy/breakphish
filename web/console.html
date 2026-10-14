@@ -236,7 +236,7 @@ VIEWS.customers=async function(){
         ?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Connected</span>'
         :'<span class="pill p-muted">Awaiting consent</span>';
       const ordered=c.orderedAt?new Date(c.orderedAt).toLocaleDateString():'—';
-      const row=el(`<tr class="${c.connection.status==='connected'?'ck':''}">
+      const row=el(`<tr>
         <td><div class="co"><div class="lg" style="background:${COLORS[i%COLORS.length]}">${initials(c.name)}</div><div style="font-weight:600">${c.name}</div></div></td>
         <td style="color:var(--muted)">${c.domain}</td><td>${prods}</td>
         <td><span class="pill p-muted">${c.service||'—'}</span></td>
@@ -246,7 +246,7 @@ VIEWS.customers=async function(){
         <td class="mono" style="color:var(--muted)">${ordered}</td>
         <td style="text-align:right;white-space:nowrap"></td></tr>`);
       const act=row.children[8];
-      if(c.connection.status==='connected'){const b=el('<button class="btn ok sm">Login As →</button>');b.onclick=(e)=>{e.stopPropagation();loginAs(c);};act.appendChild(b);row.onclick=()=>loginAs(c);}
+      if(c.connection.status==='connected'){const b=el('<button class="btn ok sm">Login As →</button>');b.onclick=(e)=>{e.stopPropagation();loginAs(c);};act.appendChild(b);}
       else{const b=el('<button class="btn teal sm">Connect</button>');b.onclick=(e)=>{e.stopPropagation();connectCustomer(c,b);};act.appendChild(b);}
       const kebab=el('<button class="btn sm" style="margin-left:6px;padding:6px 9px" title="Actions">⋮</button>');
       kebab.onclick=(e)=>{e.stopPropagation();openRowMenu(kebab,c);};
