@@ -181,7 +181,7 @@ async function logout(){await authPost('/auth/logout');STATE.session=null;render
 const ICONS={home:'M4 11l8-7 8 7M6 10v9a1 1 0 001 1h10a1 1 0 001-1v-9',mail:'M3 5h18v14H3zM4 7l8 6 8-6',grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',users:'M9 8a3 3 0 100 6 3 3 0 000-6zM3 20c0-3 3-5 6-5s6 2 6 5',shield:'M12 3l7 2.5V11c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V5.5z',lock:'M5 10h14v10H5zM8 10V7a4 4 0 018 0v3',gear:'M12 9a3 3 0 100 6 3 3 0 000-6zM12 3v3M12 18v3M4 12H1M23 12h-3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1'};
 function icon(n){return `<svg viewBox="0 0 24 24" fill="none"><path d="${ICONS[n]}" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>`;}
 const NAV_PARTNER=[['customers','Customers','grid'],['settings','Settings','gear']];
-const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Live Email Tracker','mail'],['quarantine','Quarantine','lock'],['users','Users','users'],['policy','Policy','shield']];
+const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Live Email Tracker','mail'],['quarantine','Quarantine','lock'],['users','Users','users'],['policy','Policy','shield'],['settings','Settings','gear']];
 function renderNav(){
   const nav=document.getElementById('nav');nav.innerHTML='';
   (STATE.role==='partner'?NAV_PARTNER:NAV_ADMIN).forEach(([id,label,ic])=>{
@@ -394,53 +394,125 @@ VIEWS.policy=async function(){
   return v;
 };
 
+/* ---- Settings (tabbed; partner defaults or customer scope) ---- */
+let SET=null, SETSCOPE=null;
+const TIMEZONES=['(UTC-08:00) Pacific Time','(UTC-07:00) Mountain Time','(UTC-06:00) Central Time (US & Canada)','(UTC-05:00) Eastern Time','(UTC+00:00) UTC','(UTC+01:00) Central European Time'];
+const CURRENCIES=['USD','CAD','EUR','GBP','AUD'];
+const COUNTRIES=['United States','Canada','United Kingdom','Australia','Germany','Other'];
+const DIGEST_FREQ=['Daily','Twice daily','Weekly','Custom'];
+const DIGEST_TIMES=['6:00 AM','9:00 AM','12:00 PM','3:00 PM','4:00 PM','6:00 PM'];
+const WEEKDAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const SET_VERDICTS=['clean','spam','spam_likely','phishing','malware','impersonation','policy_infomail','policy_geo'];
+
+async function saveSet(btn){const t=btn?.textContent;if(btn){btn.textContent='Saving…';btn.disabled=true;}
+  try{await api('/settings/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({settings:SET,scope:SETSCOPE})});toast('Settings saved');}
+  catch(e){toast('Save failed: '+e.message);}
+  if(btn){btn.textContent=t;btn.disabled=false;}}
+function sInput(val,on,ph){const i=el('<input>');i.value=val??'';if(ph)i.placeholder=ph;i.style.cssText='width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;font-family:inherit';i.oninput=()=>on(i.value);return i;}
+function sSelect(val,opts,on){const s=el('<select style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;font-family:inherit"></select>');opts.forEach(o=>{const op=document.createElement('option');op.textContent=o;if(o===val)op.selected=true;s.appendChild(op);});s.onchange=()=>on(s.value);return s;}
+function sField(label,node){const w=el(`<div class="field"><label>${label}</label></div>`);w.appendChild(node);return w;}
+function sCheck(label,checked,on){const w=el('<label style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;cursor:pointer;font-size:13px;margin:0 8px 8px 0"></label>');const cb=el('<input type="checkbox">');cb.checked=checked;cb.onchange=()=>on(cb.checked);w.appendChild(cb);w.appendChild(el(`<span>${label}</span>`));return w;}
+function sSaveBar(){const w=el('<div style="margin-top:18px"></div>');const b=el('<button class="btn primary">Save</button>');b.onclick=()=>saveSet(b);w.appendChild(b);return w;}
+
 VIEWS.settings=async function(){
-  const [health,ver]=await Promise.all([api('/settings/health'),api('/settings/version')]);
+  const isPartner=STATE.role==='partner';
+  const r=await api('/settings/config');SET=r.settings;SETSCOPE=r.scope;
   const v=el('<div></div>');
-  v.appendChild(el(`<div class="ph"><h1>Settings</h1><p>Server health &amp; build · partner only</p></div>`));
-  const g=el('<div class="grid2"></div>');
-
-  // Health card
-  const up=health.uptimeSec, upStr=up<3600?`${Math.floor(up/60)}m`:`${Math.floor(up/3600)}h ${Math.floor((up%3600)/60)}m`;
-  const hc=el(`<div class="card"><div class="card-h"><h3>Server health</h3><span class="pill p-ok" style="margin-left:auto"><span class="d" style="background:var(--ok)"></span>${health.status==='ok'?'Healthy':'Degraded'}</span></div></div>`);
-  const hb=el('<div style="padding:6px 18px 14px"></div>');
-  const row=(k,val)=>`<div style="display:flex;padding:9px 0;border-bottom:1px solid var(--line2)"><div style="color:var(--muted);width:160px">${k}</div><div class="mono" style="flex:1">${val}</div></div>`;
-  hb.innerHTML=
-    row('Uptime',upStr)+
-    row('Node',health.node)+
-    row('Mode',`directory=${health.mode.directory} · auth=${health.mode.auth}`)+
-    row('Connected tenants',`${health.data.connectedTenants} / ${health.data.customers}`)+
-    row('Synced users',health.data.syncedUsers)+
-    row('Scored messages',health.data.scoredMessages)+
-    row('Persistence',health.data.persistence)+
-    row('Memory (RSS)',health.memoryMb.rss+' MB');
-  hc.appendChild(hb);g.appendChild(hc);
-
-  // Version / update card
-  const vc=el(`<div class="card"><div class="card-h"><h3>Build &amp; updates</h3></div></div>`);
-  const vb=el('<div style="padding:6px 18px 16px"></div>');
-  vb.innerHTML=
-    row('Version',ver.version)+
-    row('Branch',ver.branch)+
-    row('Commit',ver.commit)+
-    row('Committed',ver.committedAt?new Date(ver.committedAt).toLocaleString():'—');
-  const upd=el('<div style="padding:14px 0 2px"></div>');
-  const btn=el('<button class="btn sm">Check for updates</button>');
-  const result=el('<div style="margin-top:12px;font-size:13px;color:var(--muted)"></div>');
-  btn.onclick=async()=>{btn.textContent='Checking…';btn.disabled=true;
-    try{const u=await api('/settings/update-check');
-      if(u.upToDate===null)result.innerHTML=`<span class="pill p-muted">Update check unavailable</span> — ${u.note||'set GITHUB_REPO to enable'}.`;
-      else if(u.upToDate===true)result.innerHTML=`<span class="pill p-ok">Up to date</span> — running the latest commit <span class="mono">${u.current}</span>.`;
-      else result.innerHTML=`<span class="pill p-warn">Update available</span> — you're on <span class="mono">${u.current}</span>, latest is <span class="mono">${u.latestRemote}</span>.<br><span style="color:var(--faint)">To update, on the droplet run: <span class="mono">./deploy.sh</span> (or <span class="mono">git pull &amp;&amp; docker compose up -d --build</span>)</span>`;
-    }catch(e){result.textContent='Update check failed: '+e.message;}
-    btn.textContent='Check for updates';btn.disabled=false;};
-  upd.appendChild(btn);vb.appendChild(upd);vb.appendChild(result);
-  vc.appendChild(vb);g.appendChild(vc);
-
-  v.appendChild(g);
-  v.appendChild(el('<div class="card p" style="margin-top:16px;color:var(--muted);font-size:13px"><b style="color:var(--txt)">Note:</b> updates are applied from the terminal by design — there is no in-app deploy button, to avoid exposing code execution over the web. This page only reports status.</div>'));
+  v.appendChild(el(`<div class="ph"><h1>Settings</h1><p>${isPartner?'Partner defaults · applied to new customers':STATE._cust.name+' · customer settings'}</p></div>`));
+  const tabs=(isPartner?['Server']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']);
+  if(!SETTAB||!tabs.includes(SETTAB))SETTAB=tabs[0];
+  const tabBar=el('<div class="tabs" style="margin-bottom:18px;flex-wrap:wrap"></div>');
+  const body=el('<div></div>');
+  const RENDER={Server:settingsServer,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners};
+  async function paint(){body.innerHTML='';body.appendChild(await RENDER[SETTAB]());}
+  tabs.forEach(t=>{const b=el(`<button class="${SETTAB===t?'on':''}">${t}</button>`);b.onclick=async()=>{SETTAB=t;tabBar.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');await paint();};tabBar.appendChild(b);});
+  v.appendChild(tabBar);v.appendChild(body);await paint();
   return v;
 };
+let SETTAB=null;
+
+async function settingsServer(){
+  const [health,ver]=await Promise.all([api('/settings/health'),api('/settings/version')]);
+  const g=el('<div class="grid2"></div>');
+  const row=(k,val)=>`<div style="display:flex;padding:9px 0;border-bottom:1px solid var(--line2)"><div style="color:var(--muted);width:160px">${k}</div><div class="mono" style="flex:1">${val}</div></div>`;
+  const up=health.uptimeSec,upStr=up<3600?`${Math.floor(up/60)}m`:`${Math.floor(up/3600)}h ${Math.floor((up%3600)/60)}m`;
+  const hc=el(`<div class="card"><div class="card-h"><h3>Server health</h3><span class="pill p-ok" style="margin-left:auto"><span class="d" style="background:var(--ok)"></span>${health.status==='ok'?'Healthy':'Degraded'}</span></div></div>`);
+  const hb=el('<div style="padding:6px 18px 14px"></div>');
+  hb.innerHTML=row('Uptime',upStr)+row('Node',health.node)+row('Mode',`directory=${health.mode.directory} · auth=${health.mode.auth}`)+row('Connected tenants',`${health.data.connectedTenants} / ${health.data.customers}`)+row('Synced users',health.data.syncedUsers)+row('Scored messages',health.data.scoredMessages)+row('Persistence',health.data.persistence)+row('Memory (RSS)',health.memoryMb.rss+' MB');
+  hc.appendChild(hb);g.appendChild(hc);
+  const vc=el(`<div class="card"><div class="card-h"><h3>Build &amp; updates</h3></div></div>`);
+  const vb=el('<div style="padding:6px 18px 16px"></div>');
+  vb.innerHTML=row('Version',ver.version)+row('Branch',ver.branch)+row('Commit',ver.commit)+row('Committed',ver.committedAt?new Date(ver.committedAt).toLocaleString():'—');
+  const btn=el('<button class="btn sm" style="margin-top:12px">Check for updates</button>');const result=el('<div style="margin-top:12px;font-size:13px;color:var(--muted)"></div>');
+  btn.onclick=async()=>{btn.textContent='Checking…';btn.disabled=true;try{const u=await api('/settings/update-check');if(u.upToDate===null)result.innerHTML=`<span class="pill p-muted">Unavailable</span> — ${u.note||''}`;else if(u.upToDate)result.innerHTML=`<span class="pill p-ok">Up to date</span> — <span class="mono">${u.current}</span>`;else result.innerHTML=`<span class="pill p-warn">Update available</span> — latest <span class="mono">${u.latestRemote}</span>`;}catch(e){result.textContent=e.message;}btn.textContent='Check for updates';btn.disabled=false;};
+  vb.appendChild(btn);vb.appendChild(result);vc.appendChild(vb);g.appendChild(vc);
+  return g;
+}
+async function settingsGeneral(){
+  const c=el('<div class="card p" style="max-width:640px"></div>');
+  c.appendChild(sField('Company name',sInput(SET.general.companyName,v=>SET.general.companyName=v)));
+  c.appendChild(sField('Time zone',sSelect(SET.general.timezone,TIMEZONES,v=>SET.general.timezone=v)));
+  c.appendChild(sSaveBar());return c;
+}
+async function settingsBilling(){
+  const c=el('<div class="card p" style="max-width:720px"></div>');const b=SET.billing;
+  c.appendChild(sField('Contact name',sInput(b.contactName,v=>b.contactName=v)));
+  c.appendChild(sField('Email',sInput(b.email,v=>b.email=v)));
+  c.appendChild(sField('VAT / Tax number',sInput(b.vatNumber,v=>b.vatNumber=v)));
+  c.appendChild(sField('Currency',sSelect(b.currency,CURRENCIES,v=>b.currency=v)));
+  c.appendChild(sField('Billing reference',sInput(b.billingReference,v=>b.billingReference=v)));
+  c.appendChild(el('<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">Address</div>'));
+  c.appendChild(sField('Address line 1',sInput(b.address.line1,v=>b.address.line1=v)));
+  c.appendChild(sField('Address line 2',sInput(b.address.line2,v=>b.address.line2=v)));
+  const two=el('<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"></div>');
+  two.appendChild(sField('Postcode',sInput(b.address.postcode,v=>b.address.postcode=v)));
+  two.appendChild(sField('City',sInput(b.address.city,v=>b.address.city=v)));
+  c.appendChild(two);
+  c.appendChild(sField('Country',sSelect(b.address.country,COUNTRIES,v=>b.address.country=v)));
+  c.appendChild(sSaveBar());return c;
+}
+async function settingsDigest(){
+  const c=el('<div class="card p" style="max-width:860px"></div>');const d=SET.quarantineDigest;
+  if(STATE.role==='partner')c.appendChild(el('<div class="callout" style="background:var(--warn-bg);border-left:3px solid var(--warn);border-radius:0 10px 10px 0;padding:11px 14px;margin:0 0 16px;font-size:13px"><b style="display:block;font-size:12px;margin-bottom:2px">NOTE</b>These apply to NEW customers. To change an existing customer, edit at the customer level.</div>'));
+  c.appendChild(sField('Digest frequency',sSelect(d.frequency,DIGEST_FREQ,v=>d.frequency=v)));
+  const days=el('<div class="field"><label>Days</label></div>');const dw=el('<div></div>');WEEKDAYS.forEach(w=>dw.appendChild(sCheck(w,d.days.includes(w),on=>{d.days=on?[...new Set([...d.days,w])]:d.days.filter(x=>x!==w);})));days.appendChild(dw);c.appendChild(days);
+  const times=el('<div class="field"><label>Times</label></div>');const tw=el('<div></div>');DIGEST_TIMES.forEach(t=>tw.appendChild(sCheck(t,d.times.includes(t),on=>{d.times=on?[...new Set([...d.times,t])]:d.times.filter(x=>x!==t);})));times.appendChild(tw);c.appendChild(times);
+  const verds=el('<div class="field"><label>Email verdicts shown in digests</label></div>');const vw=el('<div></div>');SET_VERDICTS.forEach(vk=>vw.appendChild(sCheck(VERDICT_LABEL[vk],d.verdicts.includes(vk),on=>{d.verdicts=on?[...new Set([...d.verdicts,vk])]:d.verdicts.filter(x=>x!==vk);})));verds.appendChild(vw);c.appendChild(verds);
+  c.appendChild(sField('Send release requests to',sSelect(d.sendReleaseRequestsTo,['Administrators','Partner'],v=>d.sendReleaseRequestsTo=v)));
+  c.appendChild(sSaveBar());return c;
+}
+async function settingsSecurity(){
+  const c=el('<div class="card p" style="max-width:820px"></div>');const s=SET.security;
+  const f2=el('<div style="display:flex;align-items:center;gap:14px;padding:4px 0 14px;border-bottom:1px solid var(--line2);margin-bottom:14px"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">Force 2-Factor Authentication</div><div style="font-size:11.5px;color:var(--faint)">Require users to enable 2FA on login</div></div></div>');
+  const tog=makeToggle(Boolean(s.force2fa));tog.onclick=(()=>{const o=tog.onclick;return()=>{o&&o();s.force2fa=tog._get();};})();f2.appendChild(tog);c.appendChild(f2);
+  c.appendChild(el('<div style="font-weight:600;font-size:13.5px;margin-bottom:4px">IP access allowlist</div><div style="font-size:11.5px;color:var(--faint);margin-bottom:10px">Restrict portal login to these IPs (stored; enforcement is a follow-up).</div>'));
+  const list=el('<div></div>');
+  function drawIps(){list.innerHTML='';s.ipAccess.forEach((r,i)=>{const row=el('<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr auto;gap:8px;margin-bottom:8px"></div>');row.appendChild(sInput(r.ip,v=>r.ip=v,'IP'));row.appendChild(sInput(r.mask,v=>r.mask=v,'Mask'));row.appendChild(sInput(r.comment,v=>r.comment=v,'Comment'));const del=el('<button class="btn sm" style="color:var(--danger)">✕</button>');del.onclick=()=>{s.ipAccess.splice(i,1);drawIps();};row.appendChild(del);list.appendChild(row);});}
+  drawIps();c.appendChild(list);
+  const add=el('<button class="btn sm" style="margin-top:4px">+ Add IP</button>');add.onclick=()=>{s.ipAccess.push({ip:'',mask:'',comment:''});drawIps();};c.appendChild(add);
+  c.appendChild(sSaveBar());return c;
+}
+async function settingsCustomization(){
+  const c=el('<div class="card p" style="max-width:680px"></div>');const z=SET.customization;
+  c.appendChild(sField('Logo URL',sInput(z.logoUrl,v=>z.logoUrl=v,'https://… (file upload coming later)')));
+  const bg=el('<div class="field"><label>Background color</label></div>');const col=el('<input type="color">');col.value=z.backgroundColor||'#1b1240';col.style.cssText='width:56px;height:38px;border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer';col.oninput=()=>z.backgroundColor=col.value;bg.appendChild(col);c.appendChild(bg);
+  c.appendChild(sField('Application name',sInput(z.appName,v=>z.appName=v)));
+  const act=el('<div style="display:flex;align-items:center;gap:12px;padding:8px 0"><div style="font-weight:600;font-size:13.5px">Active</div></div>');const tog=makeToggle(Boolean(z.active));tog.onclick=(()=>{const o=tog.onclick;return()=>{o&&o();z.active=tog._get();};})();act.appendChild(tog);c.appendChild(act);
+  c.appendChild(sSaveBar());return c;
+}
+async function settingsBanners(){
+  const c=el('<div class="card p"></div>');
+  c.appendChild(el('<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Verdict banners</div><div style="font-size:11.5px;color:var(--faint);margin-bottom:12px">Shown on delivered mail. Use <span class="mono">{{sender}}</span> and <span class="mono">{{source}}</span>. (Stored; injection into mail is a follow-up.)</div>'));
+  SET_VERDICTS.forEach(vk=>{
+    const bn=SET.banners[vk]||(SET.banners[vk]={color:'#6b7280',message:''});
+    const rowEl=el('<div style="display:grid;grid-template-columns:140px 46px 1fr;gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--line2)"></div>');
+    rowEl.appendChild(el(`<div style="font-size:13px;font-weight:600;padding-top:8px">${VERDICT_LABEL[vk]}</div>`));
+    const col=el('<input type="color">');col.value=bn.color;col.style.cssText='width:40px;height:34px;border:1px solid var(--line);border-radius:8px;padding:2px;cursor:pointer';col.oninput=()=>bn.color=col.value;rowEl.appendChild(col);
+    const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12.5px;font-family:inherit;min-height:52px;resize:vertical"></textarea>');ta.value=bn.message;ta.oninput=()=>bn.message=ta.value;rowEl.appendChild(ta);
+    c.appendChild(rowEl);
+  });
+  c.appendChild(sSaveBar());return c;
+}
 
 /* ---- customer row actions ---- */
 async function connectCustomer(c,btn){

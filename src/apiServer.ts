@@ -13,6 +13,7 @@ import { config } from './config';
 import { onboardCustomer, hydrateCustomers, listCustomers } from './onboarding';
 import { hydrateConnections } from './consent';
 import { hydrateDirectory, hydrateEmail } from './db/hydrate';
+import { hydrateSettings } from './settings';
 import { buildApi, connectAndSeed } from './api';
 import { buildConsentApp } from './consentServer';
 import { buildAuthApp } from './auth/authServer';
@@ -61,7 +62,8 @@ async function main() {
       const n = await hydrateConnections();
       const dir = await hydrateDirectory();
       const em = await hydrateEmail();
-      console.log(`[db] hydrated ${c} customers, ${n} connections, ${dir.users} users, ${dir.groups} groups, ${em.messages} messages from Postgres`);
+      const st = await hydrateSettings();
+      console.log(`[db] hydrated ${c} customers, ${n} connections, ${dir.users} users, ${dir.groups} groups, ${em.messages} messages, ${st} settings from Postgres`);
     } catch (e) {
       console.error('[db] migration/hydrate failed — check DATABASE_URL:', (e as Error).message);
     }

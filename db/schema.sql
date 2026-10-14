@@ -169,3 +169,10 @@ create index if not exists audit_at_idx on audit_log(at desc);
 alter table customers add column if not exists licenses   integer     not null default 0;
 alter table customers add column if not exists ordered_at  timestamptz not null default now();
 alter table customers add column if not exists flags       jsonb       not null default '{}';
+
+-- ------- partner/customer settings (keyed by scope: 'partner' or a customer id) -------
+create table if not exists settings (
+  scope      text primary key,
+  data       jsonb not null default '{}',
+  updated_at timestamptz not null default now()
+);

@@ -13,7 +13,8 @@ import { emailStore } from './emailsec/store';
 import { dashboard, liveTracker } from './emailsec/reporting';
 import { ingestTenantMail } from './emailsec/mailIngest';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
-import { attachSession, requireAuth, requirePartner, requireCustomerAccess } from './auth/middleware';
+import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf } from './auth/middleware';
+import { getSettings, saveSettings } from './settings';
 import { config } from './config';
 import { healthSnapshot } from './health';
 import { buildInfo, updateStatus } from './version';
@@ -70,6 +71,29 @@ export function buildApi() {
   api.use(attachSession);
   api.use(requireAuth);                              // every API call needs a session
   api.use('/customers/:id', requireCustomerAccess); // per-customer scope check
+
+  // ---- Settings config (partner defaults + per-customer) ----
+  // Partner may read/write 'partner' or any customer scope; an administrator
+  // only their own customer scope.
+  function resolveScope(req: any, res: any): string | null {
+    const s = sessionOf(req)!;
+    if (s.role === 'partner_admin') return String(req.query?.scope ?? req.body?.scope ?? 'partner');
+    const scope = s.customerId;
+    const asked = String(req.query?.scope ?? req.body?.scope ?? scope);
+    if (asked !== scope) { res.status(403).json({ error: 'forbidden scope' }); return null; }
+    return scope ?? null;
+  }
+  api.get('/settings/config', requireAuth, (req, res) => {
+    const scope = resolveScope(req, res); if (scope == null) return;
+    res.json({ scope, settings: getSettings(scope) });
+  });
+  api.put('/settings/config', requireAuth, async (req, res) => {
+    try {
+      const scope = resolveScope(req, res); if (scope == null) return;
+      await saveSettings(scope, req.body?.settings);
+      res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
 
   // ---- Settings: health + version (partner only, read-only) ----
   api.get('/settings/health', requirePartner, async (_req, res) => res.json(await healthSnapshot()));
