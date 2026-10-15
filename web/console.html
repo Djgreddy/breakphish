@@ -348,7 +348,7 @@ async function trackerNode(){
   data.rows.forEach(m=>{
     const dt=new Date(m.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     const srcLabel=m.source==='internal'?'Internal':'External';
-    const row=el(`<tr class="ck"><td class="mono" style="color:var(--muted);white-space:nowrap">${dt}</td>
+    const row=el(`<tr><td class="mono" style="color:var(--muted);white-space:nowrap">${dt}</td>
       <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.to}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
@@ -356,8 +356,8 @@ async function trackerNode(){
       <td><span class="pill ${DISP_CLS[m.status]}">${DISP_LABEL[m.status]}</span></td>
       <td style="color:var(--muted)"><span class="pill p-muted" style="font-weight:500">${m.service||'—'}</span></td>
       <td style="color:var(--muted)">${srcLabel}</td>
-      <td><button class="btn sm">View</button></td></tr>`);
-    row.onclick=()=>openMessage(m.id);
+      <td style="text-align:right"></td></tr>`);
+    const vb=el('<button class="btn sm">View</button>');vb.onclick=()=>openMessage(m.id);row.children[8].appendChild(vb);
     tb.appendChild(row);
   });
   card.appendChild(tbl);
@@ -433,18 +433,27 @@ VIEWS.quarantine=async function(){
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Quarantine</h1><p>${data.total} held or remediated messages</p></div>`));
   const card=el('<div class="card"></div>');
-  const tbl=el(`<table><thead><tr><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th style="text-align:right">Action</th></tr></thead><tbody></tbody></table>`);
+  const filt=el('<div class="filters"><input id="qsearch" placeholder="Search from, to, subject…" style="flex:1;min-width:200px"></div>');
+  card.appendChild(filt);
+  const tbl=el(`<table><thead><tr><th>Date &amp; Time</th><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th style="text-align:right">Action</th></tr></thead><tbody></tbody></table>`);
   const tb=tbl.querySelector('tbody');
-  if(!data.rows.length)tb.appendChild(el('<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--faint)">No held messages.</td></tr>'));
-  data.rows.slice(0,25).forEach(m=>{
-    const row=el(`<tr><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td><td style="color:var(--muted)">${m.to}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td><td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td><td style="text-align:right;white-space:nowrap"></td></tr>`);
-    const act=row.children[4];
+  function drawQ(filter){
+    tb.innerHTML='';
+    const list=data.rows.filter(m=>!filter||(m.from+' '+m.to+' '+m.subject).toLowerCase().includes(filter)).slice(0,50);
+    if(!list.length){tb.appendChild(el('<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--faint)">No held messages.</td></tr>'));return;}
+    list.forEach(m=>{
+    const dt=m.at?new Date(m.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+    const row=el(`<tr><td class="mono" style="color:var(--muted);white-space:nowrap">${dt}</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td><td style="color:var(--muted)">${m.to}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td><td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+    const act=row.children[5];
     const vw=el('<button class="btn sm">View</button>');vw.onclick=()=>openMessage(m.id);act.appendChild(vw);
     const cm={fromAddress:m.from,to:m.to};
     const rel=el('<button class="btn ok sm" style="margin-left:6px">Deliver</button>');rel.onclick=()=>confirmAct('Deliver',cm,async()=>{try{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/release',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});toast('Delivered to inbox');go('quarantine');}catch(e){toast('Failed: '+e.message);}});act.appendChild(rel);
     const del=el('<button class="btn danger sm" style="margin-left:6px">Delete</button>');del.onclick=()=>confirmAct('Delete',cm,async()=>{try{await api('/customers/'+STATE.customerId+'/messages/'+m.id+'/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});toast('Deleted');go('quarantine');}catch(e){toast('Failed: '+e.message);}});act.appendChild(del);
     tb.appendChild(row);
-  });
+    });
+  }
+  let qdeb;filt.querySelector('#qsearch').oninput=e=>{clearTimeout(qdeb);qdeb=setTimeout(()=>drawQ(e.target.value.trim().toLowerCase()),200);};
+  drawQ('');
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
@@ -568,20 +577,26 @@ async function polRules(kind,title){
   if(!rules.length)tb.appendChild(el('<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--faint)">No results.</td></tr>'));
   rules.forEach(r=>{
     const actLbl=kind==='allow'?'Allow (Deliver)':kind==='block'?'Block (Quarantine)':(r.data.action||'—');
-    const row=el(`<tr><td>${r.data.comment||'—'}</td><td style="color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(r.data.senders||[]).join(', ')||'—'}</td><td><span class="pill p-muted">${actLbl}</span></td><td><span class="pill p-muted">${r.scope==='partner'?'Global':'Customer'}</span></td><td class="mono" style="color:var(--muted)">${new Date(r.createdAt).toLocaleDateString()}</td><td style="text-align:right"></td></tr>`);
+    const row=el(`<tr><td>${r.data.comment||'—'}</td><td style="color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ruleMatch(r)}</td><td><span class="pill p-muted">${actLbl}</span></td><td><span class="pill p-muted">${r.scope==='partner'?'Global':'Customer'}</span></td><td class="mono" style="color:var(--muted)">${new Date(r.createdAt).toLocaleDateString()}</td><td style="text-align:right;white-space:nowrap"></td></tr>`);
     const act=row.children[5];
-    if(r.editable){const del=el('<button class="btn sm" style="color:var(--danger)">✕</button>');del.onclick=async()=>{if(!confirm('Delete rule?'))return;await api('/policy/rules/'+r.id,{method:'DELETE'});go(STATE.role==='partner'?'p-policy':'policy');};act.appendChild(del);}
+    if(r.editable){
+      const ed=el('<button class="btn sm">Edit</button>');ed.onclick=()=>openRuleEditor(kind,title,r);act.appendChild(ed);
+      const del=el('<button class="btn sm" style="margin-left:6px;color:var(--danger)">✕</button>');del.onclick=async()=>{if(!confirm('Delete rule?'))return;await api('/policy/rules/'+r.id,{method:'DELETE'});go(STATE.role==='partner'?'p-policy':'policy');};act.appendChild(del);
+    }
     tb.appendChild(row);
   });
   card.appendChild(tbl);v.appendChild(card);return v;
 }
-// multi-line text field returning array
-function linesField(label,hint,ph,set){const w=el(`<div class="field"><label>${label}</label></div>`);const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;min-height:60px"></textarea>');ta.placeholder=ph||'';ta.oninput=()=>set(ta.value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean));w.appendChild(ta);if(hint)w.appendChild(el(`<div style="font-size:11px;color:var(--faint);margin-top:4px">${hint}</div>`));return w;}
+// Summarize what a rule matches on, for the list.
+function ruleMatch(r){const d=r.data||{};const p=[];if(d.sender)p.push(d.sender);if(d.senders&&d.senders.length)p.push(...d.senders);if(d.ip&&d.ip.length)p.push(...d.ip.map(x=>'IP:'+x));if(d.subjects&&d.subjects.length)p.push(...d.subjects.map(x=>'Subj:'+x));if(d.urls&&d.urls.length)p.push(...d.urls.map(x=>'URL:'+x));if(d.name)p.push(d.name);return p.join(', ')||'—';}
+// multi-line text field returning array (with optional initial array)
+function linesField(label,hint,ph,set,initial){const w=el(`<div class="field"><label>${label}</label></div>`);const ta=el('<textarea style="width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;font-family:inherit;min-height:60px"></textarea>');ta.placeholder=ph||'';if(initial&&initial.length)ta.value=initial.join('\n');ta.oninput=()=>set(ta.value.split(/[\n,]/).map(x=>x.trim()).filter(Boolean));w.appendChild(ta);if(hint)w.appendChild(el(`<div style="font-size:11px;color:var(--faint);margin-top:4px">${hint}</div>`));return w;}
 function toggleField(label,desc,on,set){const r=el(`<div style="display:flex;align-items:center;gap:14px;padding:10px 0"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">${label}</div>${desc?`<div style="font-size:11.5px;color:var(--faint)">${desc}</div>`:''}</div></div>`);const t=makeToggle(on);t.onclick=(()=>{const o=t.onclick;return()=>{o&&o();set(t._get());};})();r.appendChild(t);return r;}
 
 function openRuleEditor(kind,title,r){
-  const m={comment:'',active:true,edge:false,setExpire:false,expireDate:'',sender:'',senders:[],ip:[],subjects:[],urls:[],headers:[],attachmentTypes:[],bodyRules:[],excludeVerdicts:[],allowBypass:[],action:'quarantine',preference:0,applyToAll:false,name:'',suspiciousAction:'Warn',maliciousAction:'Block',excludedUrls:[]};
-  const modal=el(`<div class="modal" style="max-width:720px"><div class="modal-h"><h2>New ${kind==='link_rewrite'?'Link Rewrite Protection Template':title+' rule'}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="rb" style="max-height:72vh;overflow:auto"></div></div>`);
+  const d=r?r.data||{}:{};const editing=!!r;
+  const m={comment:d.comment||'',active:d.active!==false,edge:!!d.edge,setExpire:!!d.setExpire,expireDate:d.expireDate||'',sender:d.sender||'',senders:d.senders||[],ip:d.ip||[],subjects:d.subjects||[],urls:d.urls||[],headers:d.headers||[],attachmentTypes:d.attachmentTypes||[],bodyRules:d.bodyRules||[],excludeVerdicts:d.excludeVerdicts||[],allowBypass:d.allowBypass||[],action:d.action||'quarantine',preference:d.preference||0,applyToAll:!!d.applyToAll,name:d.name||'',suspiciousAction:d.suspiciousAction||'Warn',maliciousAction:d.maliciousAction||'Block',excludedUrls:d.excludedUrls||[]};
+  const modal=el(`<div class="modal" style="max-width:720px"><div class="modal-h"><h2>${editing?'Edit':'New'} ${kind==='link_rewrite'?'Link Rewrite Protection':title+' rule'}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="rb" style="max-height:72vh;overflow:auto"></div></div>`);
   showModal(modal);const b=modal.querySelector('#rb');
   const sec=(t)=>el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">${t}</div>`);
 
@@ -590,40 +605,40 @@ function openRuleEditor(kind,title,r){
   }
   if(kind==='link_rewrite'){
     b.appendChild(sField('Name',sInput(m.name,v=>m.name=v,'e.g. Default Link Rewrite Protection')));
-    b.appendChild(toggleField('Active','',true,v=>m.active=v));
+    b.appendChild(toggleField('Active','',m.active,v=>m.active=v));
     b.appendChild(sField('Suspicious link action',sSelect(m.suspiciousAction,['Warn','Block','Allow'],v=>m.suspiciousAction=v)));
     b.appendChild(sField('Malicious link action',sSelect(m.maliciousAction,['Block','Warn','Allow'],v=>m.maliciousAction=v)));
-    b.appendChild(linesField('Excluded URLs','One per line (max 100). These will not be rewritten.','',v=>m.excludedUrls=v));
+    b.appendChild(linesField('Excluded URLs','One per line (max 100). These will not be rewritten.','',v=>m.excludedUrls=v,m.excludedUrls));
   } else {
     // common scope controls (partner only)
-    if(STATE.role==='partner'){b.appendChild(toggleField('Select All Customers','',false,v=>m.applyToAll=v));b.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin:-6px 0 8px">Leave off to apply globally; per-customer targeting coming next.</div>'));}
+    if(STATE.role==='partner'){b.appendChild(toggleField('Select All Customers','',m.applyToAll,v=>m.applyToAll=v));b.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin:-6px 0 8px">Leave off to apply globally; per-customer targeting coming next.</div>'));}
     if(kind==='allow'||kind==='block'){
-      b.appendChild(toggleField('Active','',true,v=>m.active=v));
-      b.appendChild(toggleField('Edge',kind==='block'?'Reject connections from sender (can take up to 1 hour).':'Bypass rejected statuses (can take up to 1 hour).',false,v=>m.edge=v));
-      b.appendChild(toggleField('Set Expire Date','',false,v=>m.setExpire=v));
+      b.appendChild(toggleField('Active','',m.active,v=>m.active=v));
+      b.appendChild(toggleField('Edge',kind==='block'?'Reject connections from sender (can take up to 1 hour).':'Bypass rejected statuses (can take up to 1 hour).',m.edge,v=>m.edge=v));
+      b.appendChild(toggleField('Set Expire Date','',m.setExpire,v=>m.setExpire=v));
       b.appendChild(sField('Expire date',sInput(m.expireDate,v=>m.expireDate=v,'YYYY-MM-DD HH:mm')));
       b.appendChild(sField('Sender',sInput(m.sender,v=>m.sender=v,'sender email or domain (wildcards: *.name.tld)')));
       b.appendChild(sField('Comment',sInput(m.comment,v=>m.comment=v,'Description')));
     }
     if(kind==='custom'||kind==='dlp'){
       b.appendChild(sec('Rule options'));
-      if(kind==='custom'){b.appendChild(linesField('Senders','Email or domain; wildcards *.name.tld','',v=>m.senders=v));b.appendChild(linesField('IP','One per line; CIDR allowed e.g. x.x.x.0/24','',v=>m.ip=v));}
-      b.appendChild(linesField('Subjects','Wildcards allowed with *','',v=>m.subjects=v));
-      b.appendChild(linesField('URLs','Wildcards allowed with *','',v=>m.urls=v));
-      b.appendChild(linesField('Headers','Key:Value e.g. X-MS-Test:12345','',v=>m.headers=v));
-      b.appendChild(linesField('Attachment types','Exclude leading dot, e.g. zip','',v=>m.attachmentTypes=v));
-      b.appendChild(linesField('Body rules','Wildcards allowed with *','',v=>m.bodyRules=v));
+      if(kind==='custom'){b.appendChild(linesField('Senders','Email or domain; wildcards *.name.tld','',v=>m.senders=v,m.senders));b.appendChild(linesField('IP','One per line; CIDR allowed e.g. x.x.x.0/24','',v=>m.ip=v,m.ip));}
+      b.appendChild(linesField('Subjects','Wildcards allowed with *','',v=>m.subjects=v,m.subjects));
+      b.appendChild(linesField('URLs','Wildcards allowed with *','',v=>m.urls=v,m.urls));
+      b.appendChild(linesField('Headers','Key:Value e.g. X-MS-Test:12345','',v=>m.headers=v,m.headers));
+      b.appendChild(linesField('Attachment types','Exclude leading dot, e.g. zip','',v=>m.attachmentTypes=v,m.attachmentTypes));
+      b.appendChild(linesField('Body rules','Wildcards allowed with *','',v=>m.bodyRules=v,m.bodyRules));
       if(kind==='custom'){const ev=el('<div class="field"><label>Exclude verdicts</label></div>');ev.appendChild(chipGroup(EXCLUDE_VERDICT_OPTS,m.excludeVerdicts));b.appendChild(ev);}
       b.appendChild(sField('Action',pairSelect(m.action,actOpts('quarantine'),v=>m.action=v)));
       b.appendChild(sField('Preference (1=highest … 10)',sInput(String(m.preference),v=>m.preference=Number(v)||0,'0')));
       if(kind==='dlp')b.appendChild(sField('Comment',sInput(m.comment,v=>m.comment=v,'Description')));
-      if(kind==='custom')b.appendChild(toggleField('Edge','Edge rules can take up to 1 hour to apply.',false,v=>m.edge=v));
+      if(kind==='custom')b.appendChild(toggleField('Edge','Edge rules can take up to 1 hour to apply.',m.edge,v=>m.edge=v));
     }
   }
   const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Cancel</button></div>');
-  const sv=el('<button class="btn primary">Submit</button>');
+  const sv=el(`<button class="btn primary">${editing?'Save':'Submit'}</button>`);
   sv.onclick=async()=>{
-    try{await api('/policy/rules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,data:m})});closeModal();toast('Saved');go(STATE.role==='partner'?'p-policy':'policy');}
+    try{await api('/policy/rules'+(editing?'/'+r.id:''),{method:editing?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,data:m})});closeModal();toast('Saved');go(STATE.role==='partner'?'p-policy':'policy');}
     catch(e){toast('Failed: '+e.message);}
   };
   foot.appendChild(sv);b.appendChild(foot);

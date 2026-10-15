@@ -19,14 +19,17 @@ import { ingestOneMessage } from './emailsec/mailIngest';
 
 export function buildWebhookApp() {
   const app = express.Router();
-  app.use(express.json({ type: ['application/json', 'text/plain'] }));
+
+  // Respond to the validation handshake FIRST — before any body parsing — so a
+  // slow/odd body can never make us miss Graph's ~10s window.
+  const echoValidation = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const t = req.query.validationToken as string | undefined;
+    if (t) { res.set('content-type', 'text/plain').status(200).send(String(t)); return; }
+    next();
+  };
 
   const handler = async (req: express.Request, res: express.Response) => {
-    // 1. validation handshake
-    const token = (req.query.validationToken ?? (req.body && req.body.validationToken)) as string | undefined;
-    if (token) { res.set('content-type', 'text/plain').status(200).send(token); return; }
-
-    // 2. notifications — ack fast, process async
+    // notifications — ack fast, process async
     const notifications: any[] = req.body?.value ?? [];
     res.status(202).send();
 
@@ -46,7 +49,8 @@ export function buildWebhookApp() {
     }
   };
 
-  app.get('/webhooks/graph', handler);
-  app.post('/webhooks/graph', handler);
+  const jsonBody = express.json({ type: () => true, limit: '1mb' });
+  app.get('/webhooks/graph', echoValidation, handler);
+  app.post('/webhooks/graph', echoValidation, jsonBody, handler);
   return app;
 }
