@@ -19,6 +19,7 @@ import { dbEnabled } from './db/db';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
 import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf } from './auth/middleware';
 import { getSettings, saveSettings } from './settings';
+import { listTeam, saveTeamMember, deleteTeamMember } from './team';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -77,6 +78,22 @@ export function buildApi() {
   api.use(attachSession);
   api.use(requireAuth);                              // every API call needs a session
   api.use('/customers/:id', requireCustomerAccess); // per-customer scope check
+
+  // ---- Team members (partner staff) ----
+  api.get('/team', requirePartner, (_req, res) => res.json({ members: listTeam() }));
+  api.post('/team', requirePartner, async (req, res) => {
+    try {
+      const { name, email, role, authType, mfaEnabled } = req.body ?? {};
+      if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
+      const m = await saveTeamMember({ name, email, role, authType, mfaEnabled: Boolean(mfaEnabled) });
+      res.status(201).json(m);
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  api.put('/team/:id', requirePartner, async (req, res) => {
+    try { const m = await saveTeamMember({ ...req.body, id: req.params.id }); res.json(m); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  api.delete('/team/:id', requirePartner, async (req, res) => { await deleteTeamMember(req.params.id); res.json({ ok: true }); });
 
   // ---- Policy (templates + rules) ----
   // A partner sees/edits partner (global) scope. A customer sees global + its own,

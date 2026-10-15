@@ -246,7 +246,6 @@ function placeholderView(title,desc){
 }
 const PLACEHOLDERS={
   'p-tracker':['Live Email Tracker','Aggregate inbound & outbound mail across all your customers.'],
-  'p-team':['Team Members','Manage your MSP staff and their console roles.'],
   'p-analytics':['Analytics','Executive summaries, verdict trends, and exportable reports.'],
   'p-invoices':['Invoices','Billing and usage invoices across your customers.'],
   'p-audit':['Audit Logs','Every action taken in the console, with actor, resource, and result.'],
@@ -405,9 +404,9 @@ async function openMessage(id){
   };
   let tab='Email Details';
   const held=['quarantine','remediated'].includes(a.disposition);
-  const modal=el(`<div class="modal" style="max-width:760px"><div class="modal-h"><h2 style="flex:1">View</h2><button class="modal-x" onclick="closeModal()">✕</button></div>
+  const modal=el(`<div class="modal" style="max-width:760px;height:78vh;display:flex;flex-direction:column"><div class="modal-h"><h2 style="flex:1">View</h2><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div style="padding:0 20px"><div class="tabs" id="mtabs" style="margin:0"></div></div>
-    <div class="modal-b" id="mbody" style="height:60vh;overflow:auto"></div>
+    <div class="modal-b" id="mbody" style="flex:1;min-height:0;overflow:auto"></div>
     <div style="display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)" id="mfoot"><button class="btn" onclick="closeModal()">Close</button><div style="flex:1"></div></div></div>`);
   showModal(modal);
   const tabsEl=modal.querySelector('#mtabs'),bodyEl=modal.querySelector('#mbody'),foot=modal.querySelector('#mfoot');
@@ -477,6 +476,53 @@ VIEWS.users=async function(){
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
+/* ---- Team Members (partner) ---- */
+const TEAM_ROLES=[['partner_admin','Administrator'],['analyst','Analyst'],['read_only','Read-only']];
+const roleLabel=(r)=>({partner_admin:'Administrator',analyst:'Analyst',read_only:'Read-only'})[r]||r;
+VIEWS['p-team']=async function(){
+  const {members}=await api('/team');
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph"><h1>Team Members</h1><p>Your MSP staff · ${members.length} member(s)</p></div>`));
+  const head=el('<div style="display:flex;margin-bottom:12px"><div style="flex:1"></div></div>');
+  const nb=el('<button class="btn primary sm">+ Add member</button>');nb.onclick=()=>openTeamEditor(null);head.appendChild(nb);v.appendChild(head);
+  const card=el('<div class="card pad0" style="overflow:hidden"></div>');
+  const tbl=el('<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Auth</th><th>MFA</th><th>Status</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
+  const tb=tbl.querySelector('tbody');
+  if(!members.length)tb.appendChild(el('<tr><td colspan="7" style="padding:30px;text-align:center;color:var(--faint)">No team members yet.</td></tr>'));
+  members.forEach(m=>{
+    const auth=m.authType==='local'?'<span class="pill p-muted">Local</span>':'<span class="pill p-info">SSO</span>';
+    const mfa=m.authType==='sso'?'<span class="pill p-ok">Via SSO</span>':(m.mfaEnabled?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>On</span>':'<span class="pill p-warn">Off</span>');
+    const status=m.status==='active'?'<span class="pill p-ok">Active</span>':'<span class="pill p-warn">Invited</span>';
+    const row=el(`<tr><td style="font-weight:600">${m.name}</td><td style="color:var(--muted)">${m.email}</td><td>${roleLabel(m.role)}</td><td>${auth}</td><td>${mfa}</td><td>${status}</td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+    const act=row.children[6];
+    const ed=el('<button class="btn sm">Edit</button>');ed.onclick=()=>openTeamEditor(m);act.appendChild(ed);
+    const del=el('<button class="btn sm" style="margin-left:6px;color:var(--danger)">✕</button>');del.onclick=async()=>{if(!confirm('Remove '+m.name+'?'))return;await api('/team/'+m.id,{method:'DELETE'});go('p-team');};act.appendChild(del);
+    tb.appendChild(row);
+  });
+  card.appendChild(tbl);v.appendChild(card);return v;
+};
+function openTeamEditor(t){
+  const m={name:t?t.name:'',email:t?t.email:'',role:t?t.role:'analyst',authType:t?t.authType:'sso',mfaEnabled:t?t.mfaEnabled:false};
+  const modal=el(`<div class="modal"><div class="modal-h"><h2>${t?'Edit':'Add'} team member</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="tmb"></div></div>`);
+  showModal(modal);const b=modal.querySelector('#tmb');
+  // auth type segmented
+  const seg=el('<div class="field"><label>Authentication</label></div>');
+  const segBar=el('<div style="display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:3px"></div>');
+  const mfaRow=el('<div style="display:flex;align-items:center;gap:14px;padding:10px 0"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">Require MFA</div><div style="font-size:11.5px;color:var(--faint)">For local sign-in (SSO uses Microsoft MFA).</div></div></div>');
+  const mfaTog=makeToggle(m.mfaEnabled);mfaTog.onclick=(()=>{const o=mfaTog.onclick;return()=>{o&&o();m.mfaEnabled=mfaTog._get();};})();mfaRow.appendChild(mfaTog);
+  [['sso','SSO (Microsoft Entra)'],['local','Local user']].forEach(([val,lbl])=>{const bt=el(`<button style="padding:7px 13px;border:none;border-radius:7px;font-size:12.5px;font-weight:600;background:${m.authType===val?'var(--brand)':'none'};color:${m.authType===val?'#fff':'var(--muted)'}">${lbl}</button>`);bt.onclick=()=>{m.authType=val;segBar.querySelectorAll('button').forEach(x=>{x.style.background='none';x.style.color='var(--muted)';});bt.style.background='var(--brand)';bt.style.color='#fff';mfaRow.style.display=val==='local'?'flex':'none';};segBar.appendChild(bt);});
+  seg.appendChild(segBar);
+  b.appendChild(sField('Full name',sInput(m.name,v=>m.name=v,'Jane Smith')));
+  b.appendChild(sField('Email',sInput(m.email,v=>m.email=v,'jane@yourmsp.com')));
+  b.appendChild(sField('Role',sSelect(roleLabel(m.role),TEAM_ROLES.map(r=>r[1]),lbl=>{const f=TEAM_ROLES.find(r=>r[1]===lbl);m.role=f?f[0]:'analyst';})));
+  b.appendChild(seg);
+  b.appendChild(mfaRow);mfaRow.style.display=m.authType==='local'?'flex':'none';
+  const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Cancel</button></div>');
+  const sv=el(`<button class="btn primary">${t?'Save':'Add member'}</button>`);
+  sv.onclick=async()=>{if(!m.name||!m.email){toast('Name and email required');return;}try{await api('/team'+(t?'/'+t.id:''),{method:t?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify(m)});closeModal();toast(t?'Member updated':'Member added');go('p-team');}catch(e){toast('Failed: '+e.message);}};
+  foot.appendChild(sv);b.appendChild(foot);
+}
+
 /* ---- Policy (templates + rules) ---- */
 const POL_TABS=['Policy Templates','Global Custom Rules','Global Outbound DLP Rules','Global Allow Rules','Global Block Rules','Auto Remediation','Link Rewrite Protection'];
 const POL_KIND={'Global Custom Rules':'custom','Global Outbound DLP Rules':'dlp','Global Allow Rules':'allow','Global Block Rules':'block','Auto Remediation':'auto_remediation','Link Rewrite Protection':'link_rewrite'};
@@ -611,7 +657,8 @@ function multiSelect(placeholder,options,selected){
   const wrap=el('<div style="position:relative"></div>');
   const ctrl=el('<div style="min-height:34px;border:1px solid var(--line);border-radius:8px;padding:3px 6px;background:var(--surface2);display:flex;flex-wrap:wrap;align-items:center;gap:4px;cursor:pointer;font-size:12.5px"></div>');
   const caret=el('<span style="margin-left:auto;color:var(--faint);padding-right:2px">▾</span>');
-  const panel=el('<div style="position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px;max-height:200px;overflow:auto;box-shadow:0 14px 36px -12px rgba(0,0,0,.55);display:none"></div>');
+  const panel=el('<div style="position:fixed;z-index:200;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px;max-height:220px;overflow:auto;box-shadow:0 14px 36px -12px rgba(0,0,0,.55);display:none"></div>');
+  document.body.appendChild(panel); // escape the modal's clipping/scroll
   const rows={};
   const refresh=()=>{
     ctrl.querySelectorAll('.chip,.ph').forEach(x=>x.remove());
@@ -622,10 +669,11 @@ function multiSelect(placeholder,options,selected){
   if(!options.length)panel.appendChild(el('<div style="color:var(--faint);font-size:12px;padding:7px 9px">No customers.</div>'));
   options.forEach(o=>{const row=el('<label style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;cursor:pointer;font-size:12.5px"></label>');const cb=el('<input type="checkbox">');rows[o.id]=cb;cb.checked=selected.includes(o.id);cb.onchange=()=>{if(cb.checked){if(!selected.includes(o.id))selected.push(o.id);}else{const i=selected.indexOf(o.id);if(i>=0)selected.splice(i,1);}refresh();};row.onmouseover=()=>row.style.background='var(--surface2)';row.onmouseout=()=>row.style.background='none';row.appendChild(cb);row.appendChild(el('<span>'+o.name+'</span>'));panel.appendChild(row);});
   ctrl.appendChild(caret);
-  ctrl.onclick=(e)=>{e.stopPropagation();panel.style.display=panel.style.display==='none'?'block':'none';};
+  const place=()=>{const r=ctrl.getBoundingClientRect();panel.style.left=r.left+'px';panel.style.width=r.width+'px';panel.style.top=(r.bottom+4)+'px';};
+  ctrl.onclick=(e)=>{e.stopPropagation();if(panel.style.display==='none'){place();panel.style.display='block';}else panel.style.display='none';};
   panel.onclick=e=>e.stopPropagation();
   document.addEventListener('click',()=>{panel.style.display='none';});
-  refresh();wrap.appendChild(ctrl);wrap.appendChild(panel);return wrap;
+  refresh();wrap.appendChild(ctrl);return wrap;
 }
 // Summarize what a rule matches on, for the list.
 function ruleMatch(r){const d=r.data||{};const p=[];if(d.sender)p.push(d.sender);if(d.senders&&d.senders.length)p.push(...d.senders);if(d.ip&&d.ip.length)p.push(...d.ip.map(x=>'IP:'+x));if(d.subjects&&d.subjects.length)p.push(...d.subjects.map(x=>'Subj:'+x));if(d.urls&&d.urls.length)p.push(...d.urls.map(x=>'URL:'+x));if(d.name)p.push(d.name);return p.join(', ')||'—';}

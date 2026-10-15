@@ -237,3 +237,8 @@ alter table messages add column if not exists sender_ip  text;
 alter table messages add column if not exists ms_verdict text;
 
 alter table messages add column if not exists sender_country text;
+
+-- team member fields: local vs SSO + MFA
+alter table team_members add column if not exists auth_type text not null default 'sso';   -- 'local' | 'sso'
+alter table team_members add column if not exists mfa_enabled boolean not null default false;
+alter table team_members add column if not exists status text not null default 'active';   -- active | invited
