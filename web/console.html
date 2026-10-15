@@ -404,7 +404,7 @@ async function openMessage(id){
   };
   let tab='Email Details';
   const held=['quarantine','remediated'].includes(a.disposition);
-  const modal=el(`<div class="modal" style="max-width:760px;height:78vh;display:flex;flex-direction:column"><div class="modal-h"><h2 style="flex:1">View</h2><button class="modal-x" onclick="closeModal()">✕</button></div>
+  const modal=el(`<div class="modal" style="width:760px;max-width:94vw;height:78vh;display:flex;flex-direction:column"><div class="modal-h"><h2 style="flex:1">View</h2><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div style="padding:0 20px"><div class="tabs" id="mtabs" style="margin:0"></div></div>
     <div class="modal-b" id="mbody" style="flex:1;min-height:0;overflow:auto"></div>
     <div style="display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)" id="mfoot"><button class="btn" onclick="closeModal()">Close</button><div style="flex:1"></div></div></div>`);
