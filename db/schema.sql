@@ -223,3 +223,11 @@ create table if not exists released_overrides (
   tenant_id           text,
   at                  timestamptz not null default now()
 );
+
+-- per-customer disable of a global (partner) rule (customer opt-out)
+create table if not exists policy_rule_overrides (
+  customer_id text not null,
+  rule_id     text not null,
+  disabled    boolean not null default true,
+  primary key (customer_id, rule_id)
+);

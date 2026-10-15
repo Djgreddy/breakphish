@@ -19,7 +19,7 @@ import { dbEnabled } from './db/db';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
 import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf } from './auth/middleware';
 import { getSettings, saveSettings } from './settings';
-import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule } from './policy';
+import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
 import { buildInfo, updateStatus } from './version';
@@ -106,8 +106,28 @@ export function buildApi() {
   });
 
   api.get('/policy/rules', requireAuth, (req, res) => {
+    const s = sessionOf(req)!;
     const { scopes, own } = policyScopes(req);
-    res.json({ rules: listRules(scopes, String(req.query.kind ?? '') || undefined).map(r => ({ ...r, editable: r.scope === own })) });
+    const kind = String(req.query.kind ?? '') || undefined;
+    let rules = listRules(scopes, kind);
+    // For a customer, only show global rules that actually target them.
+    if (s.role !== 'partner_admin') {
+      rules = rules.filter(r => r.scope === own || ruleTargetsAll(r) || (r.data.customerIds ?? []).includes(own));
+    }
+    res.json({ rules: rules.map(r => {
+      const global = r.scope === 'partner';
+      const appliesTo = ruleTargetsAll(r) ? 'All customers' : `${(r.data.customerIds ?? []).length} customer(s)`;
+      const disabledForMe = global && s.role !== 'partner_admin' ? isDisabledFor(own, r.id) : false;
+      return { ...r, editable: r.scope === own, global, appliesTo, disabledForMe };
+    }) });
+  });
+
+  // A customer opts out of (or back into) a global rule, just for themselves.
+  api.post('/policy/rules/:id/override', requireAuth, async (req, res) => {
+    const s = sessionOf(req)!;
+    if (s.role === 'partner_admin' || !s.customerId) return res.status(400).json({ error: 'only a customer can override a global rule' });
+    await setRuleOverride(s.customerId, req.params.id, Boolean(req.body?.disabled));
+    res.json({ ok: true });
   });
   api.post('/policy/rules', requireAuth, async (req, res) => {
     try { const { own } = policyScopes(req); const r = await saveRule({ ...req.body, id: undefined, scope: own }); res.status(201).json(r); }
@@ -140,6 +160,9 @@ export function buildApi() {
     try {
       const scope = resolveScope(req, res); if (scope == null) return;
       await saveSettings(scope, req.body?.settings);
+      // Keep a customer's display name in sync with its General company name.
+      const name = req.body?.settings?.general?.companyName;
+      if (scope !== 'partner' && name && getCustomer(scope)) await editCustomer(scope, { name });
       res.json({ ok: true });
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });

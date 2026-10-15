@@ -48,6 +48,28 @@ export const DEFAULT_TEMPLATE_DATA: PolicyTemplateData = {
 
 const templates = new Map<string, PolicyTemplate>();
 const rules = new Map<string, PolicyRule>();
+// customer opt-out of a global rule: key `${customerId}:${ruleId}` -> disabled
+const overrides = new Map<string, boolean>();
+const ovKey = (c: string, r: string) => `${c}:${r}`;
+
+export function isDisabledFor(customerId: string, ruleId: string): boolean { return overrides.get(ovKey(customerId, ruleId)) === true; }
+export async function setRuleOverride(customerId: string, ruleId: string, disabled: boolean): Promise<void> {
+  overrides.set(ovKey(customerId, ruleId), disabled);
+  if (dbEnabled()) await q(`insert into policy_rule_overrides (customer_id,rule_id,disabled) values ($1,$2,$3) on conflict (customer_id,rule_id) do update set disabled=excluded.disabled`, [customerId, ruleId, disabled]);
+}
+
+// Which customers a global rule targets: 'all' or a specific id list.
+export function ruleTargetsAll(r: PolicyRule): boolean { return r.data.applyToAll !== false && !(r.data.customerIds && r.data.customerIds.length); }
+function ruleTargetsCustomer(r: PolicyRule, customerId: string): boolean {
+  return ruleTargetsAll(r) || (r.data.customerIds ?? []).includes(customerId);
+}
+// Does this rule actively apply to a given tenant right now?
+export function ruleAppliesTo(r: PolicyRule, tenantId: string): boolean {
+  if (!r.enabled) return false;
+  if (r.scope === tenantId) return true;                 // the customer's own rule
+  if (r.scope === 'partner') return ruleTargetsCustomer(r, tenantId) && !isDisabledFor(tenantId, r.id); // global, targeted, not opted-out
+  return false;
+}
 
 // scoring verdict -> template verdict key
 const VERDICT_KEY: Record<string, string> = {
@@ -98,6 +120,8 @@ export function listRules(scopes: string[], kind?: string): PolicyRule[] {
 export async function saveRule(input: Partial<PolicyRule> & { scope: string; kind: string }): Promise<PolicyRule> {
   const existing = input.id ? rules.get(input.id) : undefined;
   const data = { ...(existing?.data ?? {}), ...(input.data ?? {}) };
+  // Global rules default to "all customers" unless a subset is chosen.
+  if (input.scope === 'partner' && data.applyToAll === undefined && !(data.customerIds && data.customerIds.length)) data.applyToAll = true;
   // An explicit top-level `enabled` wins; otherwise mirror the rule's `active`
   // flag (so toggling Active in the editor actually disables enforcement).
   const enabled = input.enabled ?? (data.active !== undefined ? data.active !== false : existing?.enabled ?? true);
@@ -134,9 +158,10 @@ function matchesSender(rule: PolicyRule, fromAddress: string): boolean {
     return fromAddress === s || dom === bare || dom.endsWith('.' + bare) || s === '@' + dom;
   });
 }
-// Allow wins over block. Only ENABLED rules count. Customer + partner scopes apply.
+// Allow wins over block. Only rules that actively apply to this tenant count
+// (enabled, targeted to the customer, and not opted-out by them).
 function allowBlock(tenantId: string, fromAddress: string): 'allow' | 'block' | null {
-  const active = [...rules.values()].filter(r => r.enabled && (r.scope === tenantId || r.scope === 'partner'));
+  const active = [...rules.values()].filter(r => ruleAppliesTo(r, tenantId));
   if (active.some(r => r.kind === 'allow' && matchesSender(r, fromAddress))) return 'allow';
   if (active.some(r => r.kind === 'block' && matchesSender(r, fromAddress))) return 'block';
   return null;
@@ -197,6 +222,8 @@ export async function hydratePolicy(): Promise<{ templates: number; rules: numbe
   for (const r of ts) templates.set(r.id, { id: r.id, scope: r.scope, name: r.name, comment: r.comment ?? '', deployment: r.deployment ?? '', data: { ...DEFAULT_TEMPLATE_DATA, ...(r.data ?? {}) }, isDefault: r.is_default, createdBy: r.created_by ?? '', createdAt: (r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at) });
   const rs = await q<any>('select * from policy_rules');
   for (const r of rs) rules.set(r.id, { id: r.id, scope: r.scope, kind: r.kind, data: r.data ?? {}, enabled: r.enabled, createdBy: r.created_by ?? '', createdAt: (r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at) });
+  const ov = await q<any>('select customer_id, rule_id, disabled from policy_rule_overrides');
+  for (const o of ov) overrides.set(ovKey(o.customer_id, o.rule_id), o.disabled);
   if (!listTemplates(['partner']).length) await seedBaseTemplatesPersisted();
   return { templates: templates.size, rules: rules.size };
 }

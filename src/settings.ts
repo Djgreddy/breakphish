@@ -18,6 +18,7 @@ export interface Settings {
   security: { force2fa: boolean; ipAccess: IpRule[] };
   customization: { logoDataUrl: string; backgroundColor: string; appName: string; active: boolean };
   banners: { verdict: Record<string, Banner>; contextual: Record<string, Banner> };
+  managedDomains: string[];   // custom domains the customer manages (treated as internal)
 }
 
 export const DIGEST_VERDICTS = ['clean','spam','spam_likely','phishing','malware','impersonation','policy_infomail','policy_geo'];
@@ -69,6 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
   security: { force2fa: false, ipAccess: [] },
   customization: { logoDataUrl: '', backgroundColor: '#1b1240', appName: 'BreakPhish', active: false },
   banners: DEFAULT_BANNERS,
+  managedDomains: [],
 };
 
 const cache = new Map<string, Settings>();
@@ -87,6 +89,7 @@ function merge(stored: any): Settings {
       verdict: { ...DEFAULT_SETTINGS.banners.verdict, ...(stored?.banners?.verdict ?? {}) },
       contextual: { ...DEFAULT_SETTINGS.banners.contextual, ...(stored?.banners?.contextual ?? {}) },
     },
+    managedDomains: stored?.managedDomains ?? [],
   };
 }
 

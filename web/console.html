@@ -572,18 +572,26 @@ async function polRules(kind,title){
   const head=el('<div style="display:flex;margin-bottom:12px"><div style="flex:1"></div></div>');
   const nb=el('<button class="btn primary sm">+ New rule</button>');nb.onclick=()=>openRuleEditor(kind,title,null);head.appendChild(nb);v.appendChild(head);
   const card=el('<div class="card pad0" style="overflow:hidden"></div>');
-  const tbl=el('<table><thead><tr><th>Status</th><th>Comment</th><th>Senders / match</th><th>Action</th><th>Scope</th><th>Created</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
+  const tbl=el('<table><thead><tr><th>Status</th><th>Comment</th><th>Senders / match</th><th>Action</th><th>Scope</th><th>Applies to</th><th>Created</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
   const tb=tbl.querySelector('tbody');
-  if(!rules.length)tb.appendChild(el('<tr><td colspan="7" style="padding:30px;text-align:center;color:var(--faint)">No results.</td></tr>'));
+  if(!rules.length)tb.appendChild(el('<tr><td colspan="8" style="padding:30px;text-align:center;color:var(--faint)">No results.</td></tr>'));
   rules.forEach(r=>{
     const actLbl=kind==='allow'?'Allow (Deliver)':kind==='block'?'Block (Quarantine)':(r.data.action||'—');
-    const statusPill=r.enabled?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span>':'<span class="pill p-muted">Disabled</span>';
-    const row=el(`<tr><td>${statusPill}</td><td>${r.data.comment||'—'}</td><td style="color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ruleMatch(r)}</td><td><span class="pill p-muted">${actLbl}</span></td><td><span class="pill p-muted">${r.scope==='partner'?'Global':'Customer'}</span></td><td class="mono" style="color:var(--muted)">${new Date(r.createdAt).toLocaleDateString()}</td><td style="text-align:right;white-space:nowrap"></td></tr>`);
-    const act=row.children[6];
+    // On the customer side, a global rule's effective status reflects their own opt-out.
+    const effectiveOn=r.global&&!r.editable?!r.disabledForMe:r.enabled;
+    const statusPill=effectiveOn?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span>':'<span class="pill p-muted">Disabled</span>';
+    const scopePill=r.global?'<span class="pill p-info">Global</span>':'<span class="pill p-muted">Customer</span>';
+    const row=el(`<tr><td>${statusPill}</td><td>${r.data.comment||'—'}</td><td style="color:var(--muted);max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ruleMatch(r)}</td><td><span class="pill p-muted">${actLbl}</span></td><td>${scopePill}</td><td style="color:var(--muted);font-size:12px">${r.appliesTo||'—'}</td><td class="mono" style="color:var(--muted)">${new Date(r.createdAt).toLocaleDateString()}</td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+    const act=row.children[7];
     if(r.editable){
       const tg=el(`<button class="btn sm">${r.enabled?'Disable':'Enable'}</button>`);tg.onclick=async()=>{try{await api('/policy/rules/'+r.id,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({kind:r.kind,enabled:!r.enabled,data:{...r.data,active:!r.enabled}})});toast(r.enabled?'Rule disabled':'Rule enabled');go(STATE.role==='partner'?'p-policy':'policy');}catch(e){toast('Failed: '+e.message);}};act.appendChild(tg);
       const ed=el('<button class="btn sm" style="margin-left:6px">Edit</button>');ed.onclick=()=>openRuleEditor(kind,title,r);act.appendChild(ed);
       const del=el('<button class="btn sm" style="margin-left:6px;color:var(--danger)">✕</button>');del.onclick=async()=>{if(!confirm('Delete rule?'))return;await api('/policy/rules/'+r.id,{method:'DELETE'});go(STATE.role==='partner'?'p-policy':'policy');};act.appendChild(del);
+    } else if(r.global&&STATE.role!=='partner'){
+      // customer can opt out of (or back into) a global rule for themselves
+      const tg=el(`<button class="btn sm">${r.disabledForMe?'Enable for us':'Disable for us'}</button>`);
+      tg.onclick=async()=>{try{await api('/policy/rules/'+r.id+'/override',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({disabled:!r.disabledForMe})});toast(r.disabledForMe?'Enabled for your org':'Disabled for your org');go('policy');}catch(e){toast('Failed: '+e.message);}};
+      act.appendChild(tg);
     }
     tb.appendChild(row);
   });
@@ -597,7 +605,7 @@ function toggleField(label,desc,on,set){const r=el(`<div style="display:flex;ali
 
 function openRuleEditor(kind,title,r){
   const d=r?r.data||{}:{};const editing=!!r;
-  const m={comment:d.comment||'',active:d.active!==false,edge:!!d.edge,setExpire:!!d.setExpire,expireDate:d.expireDate||'',sender:d.sender||'',senders:d.senders||[],ip:d.ip||[],subjects:d.subjects||[],urls:d.urls||[],headers:d.headers||[],attachmentTypes:d.attachmentTypes||[],bodyRules:d.bodyRules||[],excludeVerdicts:d.excludeVerdicts||[],allowBypass:d.allowBypass||[],action:d.action||'quarantine',preference:d.preference||0,applyToAll:!!d.applyToAll,name:d.name||'',suspiciousAction:d.suspiciousAction||'Warn',maliciousAction:d.maliciousAction||'Block',excludedUrls:d.excludedUrls||[]};
+  const m={comment:d.comment||'',active:d.active!==false,edge:!!d.edge,setExpire:!!d.setExpire,expireDate:d.expireDate||'',sender:d.sender||'',senders:d.senders||[],ip:d.ip||[],subjects:d.subjects||[],urls:d.urls||[],headers:d.headers||[],attachmentTypes:d.attachmentTypes||[],bodyRules:d.bodyRules||[],excludeVerdicts:d.excludeVerdicts||[],allowBypass:d.allowBypass||[],action:d.action||'quarantine',preference:d.preference||0,applyToAll:d.applyToAll!==undefined?d.applyToAll:true,customerIds:d.customerIds||[],name:d.name||'',suspiciousAction:d.suspiciousAction||'Warn',maliciousAction:d.maliciousAction||'Block',excludedUrls:d.excludedUrls||[]};
   const modal=el(`<div class="modal" style="max-width:720px"><div class="modal-h"><h2>${editing?'Edit':'New'} ${kind==='link_rewrite'?'Link Rewrite Protection':title+' rule'}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="rb" style="max-height:72vh;overflow:auto"></div></div>`);
   showModal(modal);const b=modal.querySelector('#rb');
   const sec=(t)=>el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">${t}</div>`);
@@ -612,8 +620,15 @@ function openRuleEditor(kind,title,r){
     b.appendChild(sField('Malicious link action',sSelect(m.maliciousAction,['Block','Warn','Allow'],v=>m.maliciousAction=v)));
     b.appendChild(linesField('Excluded URLs','One per line (max 100). These will not be rewritten.','',v=>m.excludedUrls=v,m.excludedUrls));
   } else {
-    // common scope controls (partner only)
-    if(STATE.role==='partner'){b.appendChild(toggleField('Select All Customers','',m.applyToAll,v=>m.applyToAll=v));b.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin:-6px 0 8px">Leave off to apply globally; per-customer targeting coming next.</div>'));}
+    // common scope controls (partner only): target all customers or a subset.
+    if(STATE.role==='partner'){
+      const custWrap=el('<div class="field" style="'+(m.applyToAll?'display:none':'')+'"><label>Customers</label></div>');
+      const holder=el('<div style="max-height:170px;overflow:auto;border:1px solid var(--line);border-radius:9px;padding:8px"><div style="color:var(--faint);font-size:12px">Loading…</div></div>');
+      custWrap.appendChild(holder);custWrap.appendChild(el('<div style="font-size:11px;color:var(--faint);margin-top:4px">Only the selected customers receive this rule.</div>'));
+      b.appendChild(toggleField('Select All Customers','On: applies to every customer. Off: choose specific customers below.',m.applyToAll,v=>{m.applyToAll=v;custWrap.style.display=v?'none':'block';}));
+      b.appendChild(custWrap);
+      api('/customers').then(list=>{holder.innerHTML='';if(!list.length){holder.appendChild(el('<div style="color:var(--faint);font-size:12px">No customers.</div>'));return;}list.forEach(c=>holder.appendChild(sCheck(c.name,m.customerIds.includes(c.id),ck=>{if(ck){if(!m.customerIds.includes(c.id))m.customerIds.push(c.id);}else{const i=m.customerIds.indexOf(c.id);if(i>=0)m.customerIds.splice(i,1);}})));}).catch(()=>{holder.innerHTML='<div style="color:var(--danger);font-size:12px">Could not load customers</div>';});
+    }
     if(kind==='allow'||kind==='block'){
       b.appendChild(toggleField('Active','',m.active,v=>m.active=v));
       b.appendChild(toggleField('Edge',kind==='block'?'Reject connections from sender (can take up to 1 hour).':'Bypass rejected statuses (can take up to 1 hour).',m.edge,v=>m.edge=v));
@@ -688,9 +703,9 @@ VIEWS.settings=async function(){
   const r=await api('/settings/config');SET=r.settings;SETSCOPE=r.scope;
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Settings</h1><p>${isPartner?'Partner defaults · applied to new customers':STATE._cust.name+' · customer settings'}</p></div>`));
-  const tabs=(isPartner?['Server']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']);
+  const tabs=(isPartner?['Server']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']).concat(isPartner?[]:['Domains']);
   if(!SETTAB||!tabs.includes(SETTAB))SETTAB=tabs[0];
-  const RENDER={Server:settingsServer,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners};
+  const RENDER={Server:settingsServer,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners,Domains:settingsDomains};
   const wrap=el('<div style="display:flex;gap:20px;align-items:flex-start"></div>');
   const sideNav=el('<div class="card" style="width:220px;flex:none;padding:8px"></div>');
   const body=el('<div style="flex:1;min-width:0"></div>');
@@ -815,6 +830,31 @@ async function applyBranding(){
       brand.innerHTML=DEFAULT_BRAND;
     }
   }catch(e){ brand.innerHTML=DEFAULT_BRAND; }
+}
+async function settingsDomains(){
+  if(!Array.isArray(SET.managedDomains))SET.managedDomains=[];
+  const c=el('<div class="card p"></div>');
+  c.appendChild(el('<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Domains managed for this customer. Verified domains come from Microsoft 365. Add custom domains you also want treated as internal.</div>'));
+  // verified (read-only) from the customer connection
+  let verified=[];try{const cust=await api('/customers/'+STATE.customerId);verified=cust.connection?.verifiedDomains||[];}catch(e){}
+  const tbl=el('<table><thead><tr><th>Domain</th><th>Type</th><th>Status</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
+  const tb=tbl.querySelector('tbody');
+  function draw(){
+    tb.innerHTML='';
+    verified.forEach(d=>tb.appendChild(el(`<tr><td style="font-weight:600">${d}</td><td><span class="pill p-muted">Verified (M365)</span></td><td><span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span></td><td></td></tr>`)));
+    SET.managedDomains.forEach((d,i)=>{const row=el(`<tr><td style="font-weight:600">${d}</td><td><span class="pill p-info">Custom</span></td><td><span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span></td><td style="text-align:right"></td></tr>`);const del=el('<button class="btn sm" style="color:var(--danger)">✕</button>');del.onclick=()=>{SET.managedDomains.splice(i,1);draw();};row.children[3].appendChild(del);tb.appendChild(row);});
+    if(!verified.length&&!SET.managedDomains.length)tb.appendChild(el('<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--faint)">No domains yet.</td></tr>'));
+  }
+  draw();
+  const card2=el('<div class="card pad0" style="overflow:hidden;margin-bottom:14px"></div>');card2.appendChild(tbl);
+  const add=el('<div style="display:flex;gap:8px;max-width:460px"></div>');
+  const inp=el('<input placeholder="add a domain, e.g. example.com" style="flex:1;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px">');
+  const addBtn=el('<button class="btn sm">+ Add domain</button>');
+  addBtn.onclick=()=>{const v=inp.value.trim().toLowerCase().replace(/^@/,'');if(!v)return;if(!verified.includes(v)&&!SET.managedDomains.includes(v))SET.managedDomains.push(v);inp.value='';draw();};
+  inp.onkeydown=e=>{if(e.key==='Enter')addBtn.onclick();};
+  add.appendChild(inp);add.appendChild(addBtn);
+  const wrap=el('<div></div>');wrap.appendChild(card2);wrap.appendChild(add);wrap.appendChild(sSaveBar());
+  return wrap;
 }
 async function settingsBanners(){
   const c=el('<div class="card p"></div>');

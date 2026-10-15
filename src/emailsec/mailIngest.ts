@@ -13,6 +13,7 @@ import { getConnection } from '../consent';
 import { analyze } from './pipeline';
 import { emailStore } from './store';
 import { applyDisposition } from './mailActions';
+import { getSettings } from '../settings';
 import type { Message } from './types';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -96,9 +97,10 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
 }
 
 async function ingestMailbox(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, token: string): Promise<number> {
+  const internal = [...verifiedDomains, ...getSettings(tenantId).managedDomains];
   let n = 0;
-  n += await ingestFolder(tenantId, entraTenantId, verifiedDomains, userId, token, 'inbox');
-  n += await ingestFolder(tenantId, entraTenantId, verifiedDomains, userId, token, 'sentitems');
+  n += await ingestFolder(tenantId, entraTenantId, internal, userId, token, 'inbox');
+  n += await ingestFolder(tenantId, entraTenantId, internal, userId, token, 'sentitems');
   return n;
 }
 
@@ -114,7 +116,8 @@ export async function ingestOneMessage(tenantId: string, entraTenantId: string, 
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
   if (!res.ok) { console.error(`[webhook] fetch message failed ${res.status}`); return null; }
   const m = await res.json();
-  const analysis = await analyze(normalize(tenantId, t.verifiedDomains, m, 'inbox'));
+  const internalDomains = [...t.verifiedDomains, ...getSettings(tenantId).managedDomains];
+  const analysis = await analyze(normalize(tenantId, internalDomains, m, 'inbox'));
   if (['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
     await applyDisposition(entraTenantId, userId, { graphId: m.id, internetMessageId: m.internetMessageId }, analysis.disposition);
   }
