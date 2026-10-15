@@ -64,6 +64,16 @@ function ruleTargetsCustomer(r: PolicyRule, customerId: string): boolean {
   return ruleTargetsAll(r) || (r.data.customerIds ?? []).includes(customerId);
 }
 // Does this rule actively apply to a given tenant right now?
+// The allow/block rule (if any) that governs a given sender for a tenant — for display.
+export function matchingRule(tenantId: string, fromAddress: string): { kind: string; label: string } | null {
+  const active = [...rules.values()].filter(r => ruleAppliesTo(r, tenantId));
+  const allow = active.find(r => r.kind === 'allow' && matchesSender(r, fromAddress));
+  if (allow) return { kind: 'allow', label: `Allow | ${(allow.data.sender ?? (allow.data.senders ?? []).join(','))}` };
+  const block = active.find(r => r.kind === 'block' && matchesSender(r, fromAddress));
+  if (block) return { kind: 'block', label: `Block | ${(block.data.sender ?? (block.data.senders ?? []).join(','))}` };
+  return null;
+}
+
 export function ruleAppliesTo(r: PolicyRule, tenantId: string): boolean {
   if (!r.enabled) return false;
   if (r.scope === tenantId) return true;                 // the customer's own rule

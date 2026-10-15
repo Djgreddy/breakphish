@@ -231,3 +231,9 @@ create table if not exists policy_rule_overrides (
   disabled    boolean not null default true,
   primary key (customer_id, rule_id)
 );
+
+-- message enrichment from Microsoft headers
+alter table messages add column if not exists sender_ip  text;
+alter table messages add column if not exists ms_verdict text;
+
+alter table messages add column if not exists sender_country text;

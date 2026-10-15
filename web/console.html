@@ -382,18 +382,22 @@ async function openMessage(id){
   const authPill=x=>x==='pass'?'<span class="pill p-ok">Pass</span>':x==='fail'?'<span class="pill p-danger">Fail</span>':'<span class="pill p-warn">None</span>';
   const spamScore=(a.signals||[]).reduce((s,x)=>s+(x.weight||0),0);
   const toneCls={spam:'p-warn',phishing:'p-danger',malware:'p-danger',impersonation:'p-danger',policy_infomail:'p-info',policy_geo:'p-info'};
+  const en=d.enrich||{};
   const TABS={
     'Email Details':()=>`<div style="border:1px solid var(--line2);border-radius:10px;overflow:hidden">
-      ${kv('Header From',`${m.fromDisplay} &lt;${m.fromAddress}&gt;`)}${kv('To',m.to)}${kv('Reply-To',m.replyTo||'—')}${kv('Subject',m.subject)}
-      ${kv('Received At',new Date(m.receivedAt).toLocaleString())}${kv('Source',m.source==='internal'?'Internal':'External')}
-      ${kv('Attachments',(m.attachments&&m.attachments.length)?m.attachments.map(x=>x.filename).join(', '):'—')}
-      ${kv('Direction',m.direction)}${kv('Message ID',`<span class="mono" style="font-size:12px">${m.id}</span>`)}
+      ${kv('Envelope From',m.fromAddress)}${kv('Header From',`${m.fromDisplay} &lt;${m.fromAddress}&gt;`)}${kv('To',m.to)}${kv('Reply-To',m.replyTo||'—')}${kv('Subject',m.subject)}
+      ${kv('Received At',new Date(m.receivedAt).toLocaleString())}${kv('Sender IP',en.senderIp?`<span class="mono">${en.senderIp}</span>`:'—')}${kv('Country',en.country||'—')}
+      ${kv('Source',m.source==='internal'?'Internal':'External')}${kv('Attachments',(m.attachments&&m.attachments.length)?m.attachments.map(x=>x.filename).join(', '):'—')}
+      ${kv('Direction',m.direction)}${kv('Queue ID',`<span class="mono" style="font-size:12px">${en.queueId||m.id}</span>`)}${kv('Message ID',`<span class="mono" style="font-size:12px">${m.internetMessageId||m.id}</span>`)}
       ${kv('Service',d.message.service||'BreakPhish 365')}${kv('Status',`<span class="pill ${DISP_CLS[a.disposition]}">${DISP_LABEL[a.disposition]}</span> ${m.to}`)}</div>`,
     'Analysis':()=>`<div style="border:1px solid var(--line2);border-radius:10px;overflow:hidden">
       ${kv('Status',`<span class="pill ${DISP_CLS[a.disposition]}">${DISP_LABEL[a.disposition]}</span>`)}
       ${kv('Verdict',`<span class="pill ${VERDICT_CLS[a.verdict]}">${d.verdictLabel}</span>`)}
+      ${kv('Microsoft Verdict',en.msVerdict?`<span class="pill p-muted">${en.msVerdict}</span>`:'—')}
+      ${kv('Context',en.context?`<span class="pill p-warn">${en.context}</span>`:'—')}
       ${kv('SPF',authPill(m.auth.spf))}${kv('DKIM',authPill(m.auth.dkim))}${kv('DMARC',authPill(m.auth.dmarc))}
-      ${kv('Spam Score',`<span class="mono">${(spamScore/14).toFixed(2)}</span>`)}
+      ${kv('Spam Score',`<span class="mono">${(en.spamScore!=null?en.spamScore:spamScore/14).toFixed(2)}</span>`)}
+      ${kv('Rule(s)',en.rules?`<span class="mono" style="font-size:12px">${en.rules}</span>`:'—')}
       ${kv('Known Contact',m.firstTimeSender?'No':'Yes')}
       ${kv('Signals',(a.signals||[]).length?(a.signals.map(s=>`<div class="sig" style="padding:6px 0"><div class="ic ${toneCls[s.category]||'p-muted'}">!</div><div class="st"><b>${s.detail}</b><span style="color:var(--muted);font-size:12px">${s.code}</span></div><div class="w">+${s.weight}</div></div>`).join('')):'No risk signals.')}</div>`,
     'Preview':()=>{const held=['quarantine','remediated'].includes(a.disposition);return held&&m.bodyText?`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Email body</div><div style="border:1px solid var(--line2);border-radius:10px;padding:14px;font-size:13px;white-space:pre-wrap;color:var(--txt);max-height:46vh;overflow:auto">${(m.bodyText||'').replace(/</g,'&lt;')}</div>`:`<div style="padding:16px;color:var(--warn);font-size:13px">No preview available. Preview is only shown for quarantined mail; clean and delivered mail content is not stored.</div>`;},
@@ -403,7 +407,7 @@ async function openMessage(id){
   const held=['quarantine','remediated'].includes(a.disposition);
   const modal=el(`<div class="modal" style="max-width:760px"><div class="modal-h"><h2 style="flex:1">View</h2><button class="modal-x" onclick="closeModal()">✕</button></div>
     <div style="padding:0 20px"><div class="tabs" id="mtabs" style="margin:0"></div></div>
-    <div class="modal-b" id="mbody" style="max-height:60vh;overflow:auto"></div>
+    <div class="modal-b" id="mbody" style="height:60vh;overflow:auto"></div>
     <div style="display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)" id="mfoot"><button class="btn" onclick="closeModal()">Close</button><div style="flex:1"></div></div></div>`);
   showModal(modal);
   const tabsEl=modal.querySelector('#mtabs'),bodyEl=modal.querySelector('#mbody'),foot=modal.querySelector('#mfoot');
@@ -601,19 +605,27 @@ async function polRules(kind,title){
   });
   card.appendChild(tbl);v.appendChild(card);return v;
 }
-// Mesh-style multi-select dropdown. Mutates `selected` (array of ids) in place.
+// Mesh-style compact multi-select: chips in the control, checkbox-left list.
 function multiSelect(placeholder,options,selected){
+  const byId={};options.forEach(o=>byId[o.id]=o);
   const wrap=el('<div style="position:relative"></div>');
-  const btn=el('<button type="button" style="width:100%;text-align:left;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;background:var(--surface2);color:var(--txt);display:flex;align-items:center;gap:8px"></button>');
-  const label=el('<span style="flex:1"></span>');btn.appendChild(label);btn.appendChild(el('<span style="color:var(--faint)">▾</span>'));
-  const panel=el('<div style="position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:6px;max-height:230px;overflow:auto;box-shadow:0 18px 44px -14px rgba(0,0,0,.55);display:none"></div>');
-  const refresh=()=>{label.textContent=selected.length?selected.length+' selected':placeholder;label.style.color=selected.length?'var(--txt)':'var(--faint)';};
-  if(!options.length)panel.appendChild(el('<div style="color:var(--faint);font-size:12px;padding:8px 10px">No customers.</div>'));
-  options.forEach(o=>{const row=el('<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:13px"></label>');const cb=el('<input type="checkbox">');cb.checked=selected.includes(o.id);cb.onchange=()=>{if(cb.checked){if(!selected.includes(o.id))selected.push(o.id);}else{const i=selected.indexOf(o.id);if(i>=0)selected.splice(i,1);}refresh();};row.onmouseover=()=>row.style.background='var(--surface2)';row.onmouseout=()=>row.style.background='none';row.appendChild(cb);row.appendChild(el('<span>'+o.name+'</span>'));panel.appendChild(row);});
-  btn.onclick=(e)=>{e.stopPropagation();panel.style.display=panel.style.display==='none'?'block':'none';};
+  const ctrl=el('<div style="min-height:34px;border:1px solid var(--line);border-radius:8px;padding:3px 6px;background:var(--surface2);display:flex;flex-wrap:wrap;align-items:center;gap:4px;cursor:pointer;font-size:12.5px"></div>');
+  const caret=el('<span style="margin-left:auto;color:var(--faint);padding-right:2px">▾</span>');
+  const panel=el('<div style="position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px;max-height:200px;overflow:auto;box-shadow:0 14px 36px -12px rgba(0,0,0,.55);display:none"></div>');
+  const rows={};
+  const refresh=()=>{
+    ctrl.querySelectorAll('.chip,.ph').forEach(x=>x.remove());
+    if(!selected.length){const ph=el(`<span class="ph" style="color:var(--faint);padding:3px 2px">${placeholder}</span>`);ctrl.insertBefore(ph,caret);}
+    else selected.forEach(id=>{const o=byId[id];if(!o)return;const chip=el(`<span class="chip" style="display:inline-flex;align-items:center;gap:5px;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:2px 6px"><span>${o.name}</span><span style="color:var(--faint);cursor:pointer">✕</span></span>`);chip.querySelector('span:last-child').onclick=(e)=>{e.stopPropagation();const i=selected.indexOf(id);if(i>=0)selected.splice(i,1);if(rows[id])rows[id].checked=false;refresh();};ctrl.insertBefore(chip,caret);});
+    Object.keys(rows).forEach(id=>rows[id].checked=selected.includes(id));
+  };
+  if(!options.length)panel.appendChild(el('<div style="color:var(--faint);font-size:12px;padding:7px 9px">No customers.</div>'));
+  options.forEach(o=>{const row=el('<label style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;cursor:pointer;font-size:12.5px"></label>');const cb=el('<input type="checkbox">');rows[o.id]=cb;cb.checked=selected.includes(o.id);cb.onchange=()=>{if(cb.checked){if(!selected.includes(o.id))selected.push(o.id);}else{const i=selected.indexOf(o.id);if(i>=0)selected.splice(i,1);}refresh();};row.onmouseover=()=>row.style.background='var(--surface2)';row.onmouseout=()=>row.style.background='none';row.appendChild(cb);row.appendChild(el('<span>'+o.name+'</span>'));panel.appendChild(row);});
+  ctrl.appendChild(caret);
+  ctrl.onclick=(e)=>{e.stopPropagation();panel.style.display=panel.style.display==='none'?'block':'none';};
   panel.onclick=e=>e.stopPropagation();
   document.addEventListener('click',()=>{panel.style.display='none';});
-  refresh();wrap.appendChild(btn);wrap.appendChild(panel);return wrap;
+  refresh();wrap.appendChild(ctrl);wrap.appendChild(panel);return wrap;
 }
 // Summarize what a rule matches on, for the list.
 function ruleMatch(r){const d=r.data||{};const p=[];if(d.sender)p.push(d.sender);if(d.senders&&d.senders.length)p.push(...d.senders);if(d.ip&&d.ip.length)p.push(...d.ip.map(x=>'IP:'+x));if(d.subjects&&d.subjects.length)p.push(...d.subjects.map(x=>'Subj:'+x));if(d.urls&&d.urls.length)p.push(...d.urls.map(x=>'URL:'+x));if(d.name)p.push(d.name);return p.join(', ')||'—';}

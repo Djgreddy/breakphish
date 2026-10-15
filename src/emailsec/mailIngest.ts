@@ -26,6 +26,24 @@ function authFromHeaders(headers: Array<{ name: string; value: string }> = []) {
   return { spf: read('spf'), dkim: read('dkim'), dmarc: read('dmarc') };
 }
 
+// Microsoft stamps its own result in X-Forefront-Antispam-Report (CIP = connecting
+// IP, SFV = spam filter verdict) and X-Microsoft-Antispam (BCL). Parse what's there.
+function msEnrichment(headers: Array<{ name: string; value: string }> = []) {
+  const h = (n: string) => headers.find(x => x.name.toLowerCase() === n.toLowerCase())?.value ?? '';
+  const ffar = h('X-Forefront-Antispam-Report');
+  const cip = /CIP:([0-9a-fA-F.:]+)/.exec(ffar)?.[1];
+  const xorig = /\[?([0-9]{1,3}(?:\.[0-9]{1,3}){3})\]?/.exec(h('X-Originating-IP'))?.[1];
+  const sfv = /SFV:([A-Z]+)/.exec(ffar)?.[1];
+  const SFV: Record<string, string> = { NSPM: 'Not Spam', SPM: 'Spam', SKS: 'Skipped (rule)', BLK: 'Blocked', SKI: 'Skipped', SKN: 'Not Spam (allow)', SKQ: 'Released' };
+  const bcl = /BCL:(\d+)/.exec(h('X-Microsoft-Antispam'))?.[1];
+  let msVerdict = sfv ? (SFV[sfv] ?? sfv) : '';
+  if (!msVerdict && bcl && Number(bcl) > 0) msVerdict = `Bulk (BCL ${bcl})`;
+  const ctry = /CTRY:([A-Z]{2})/.exec(ffar)?.[1];
+  const COUNTRY: Record<string, string> = { US: 'United States', CA: 'Canada', GB: 'United Kingdom', AU: 'Australia', DE: 'Germany', FR: 'France', NL: 'Netherlands', IN: 'India', CN: 'China', RU: 'Russia', BR: 'Brazil' };
+  const country = ctry ? (COUNTRY[ctry] ?? ctry) : '';
+  return { senderIp: cip ?? xorig ?? '', msVerdict, country };
+}
+
 function stripHtml(s: string): string {
   return (s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
 }
@@ -45,10 +63,14 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
   // Internal = stays inside the org (both ends verified). Otherwise external.
   const source: 'internal' | 'external' = internalSender && internalRecipient ? 'internal' : 'external';
   const bodyText = m.body?.contentType === 'html' ? stripHtml(m.body?.content) : (m.body?.content ?? m.bodyPreview ?? '');
+  const ms = msEnrichment(m.internetMessageHeaders);
   return {
     id: m.id,
     internetMessageId: m.internetMessageId,
     tenantId,
+    senderIp: ms.senderIp,
+    msVerdict: ms.msVerdict,
+    senderCountry: ms.country,
     direction: outbound ? 'outbound' : (internalSender ? 'internal' : 'inbound'),
     source,
     fromAddress,

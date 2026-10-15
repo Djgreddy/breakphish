@@ -19,7 +19,7 @@ import { dbEnabled } from './db/db';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
 import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf } from './auth/middleware';
 import { getSettings, saveSettings } from './settings';
-import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride } from './policy';
+import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
 import { buildInfo, updateStatus } from './version';
@@ -334,7 +334,13 @@ export function buildApi() {
       { at: m.receivedAt, event: 'Content analysis' },
       { at: m.receivedAt, event: a.disposition === 'remediated' ? 'Remediated' : a.disposition === 'quarantine' ? 'Quarantined' : a.disposition === 'junk' ? 'Moved to Junk' : 'Delivered' },
     ];
-    res.json({ message: m, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events });
+    // Context = the leading risk-signal category, labeled.
+    const top = (a.signals ?? []).slice().sort((x: any, y: any) => (y.weight ?? 0) - (x.weight ?? 0))[0];
+    const CTX: Record<string, string> = { spam: 'Content - Spam', phishing: 'Content - Phishing', malware: 'Attachment - Malware', impersonation: 'Identity - Impersonation', policy_infomail: 'Content - Infomail', policy_geo: 'Origin - Geo', auth: 'Authentication', reputation: 'Sender Reputation', url: 'Content - URL', behavioral: 'Behavioral' };
+    const context = a.verdict === 'clean' ? 'Clean' : (top ? (CTX[top.category] ?? top.category) : CTX[a.verdict] ?? '—');
+    const rule = matchingRule(m.tenantId, m.fromAddress);
+    const enrich = { queueId: m.id, senderIp: m.senderIp || '', country: m.senderCountry || '', msVerdict: m.msVerdict || '', context, rules: rule ? rule.label : '', spamScore: Math.round(((a.signals ?? []).reduce((s: number, x: any) => s + (x.weight ?? 0), 0) / 14) * 100) / 100 };
+    res.json({ message: m, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich });
   });
 
   // Remediate a delivered message now: move it to quarantine and mark it.

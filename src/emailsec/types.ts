@@ -40,6 +40,9 @@ export interface Attachment {
 export interface Message {
   id: string;                      // Graph item id (changes when the message moves folders)
   internetMessageId?: string;      // stable RFC id (use this to re-find the message)
+  senderIp?: string;               // connecting IP (from Microsoft headers)
+  msVerdict?: string;              // Microsoft's own spam verdict (SFV/BCL)
+  senderCountry?: string;          // sender country (from Microsoft headers)
   tenantId: string;
   direction: Direction;
   source: 'external' | 'internal';
