@@ -17,10 +17,11 @@ import { subscribeTenant, listSubscriptions } from './emailsec/subscriptions';
 import { persistScored } from './db/hydrate';
 import { dbEnabled } from './db/db';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
-import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf } from './auth/middleware';
+import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sessionOf, blockReadOnlyWrites, requireTeamAdmin } from './auth/middleware';
 import { getSettings, saveSettings } from './settings';
 import { listTeam, saveTeamMember, deleteTeamMember } from './team';
 import { hashPassword } from './auth/localAuth';
+import { audit, listAudit } from './audit';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -78,7 +79,17 @@ export function buildApi() {
   api.use(express.json({ limit: '4mb' })); // settings can include a base64 logo
   api.use(attachSession);
   api.use(requireAuth);                              // every API call needs a session
+  api.use(blockReadOnlyWrites);                      // read-only team members: GET only
   api.use('/customers/:id', requireCustomerAccess); // per-customer scope check
+
+  // ---- Audit log ----
+  const logReq = (req: any, action: string, resource?: string, detail?: string, customerId?: string) => {
+    const s = sessionOf(req);
+    audit({ actorEmail: s?.email, role: s?.teamRole ?? s?.role, action, resource, detail, customerId });
+  };
+  api.get('/audit', requirePartner, (req, res) => {
+    res.json({ entries: listAudit({ q: String(req.query.q ?? '') || undefined, limit: 300 }) });
+  });
 
   // ---- Analytics (partner aggregate, or a single customer) ----
   api.get('/analytics', requireAuth, (req, res) => {
@@ -125,17 +136,18 @@ export function buildApi() {
   // ---- Team members (partner staff) ----
   const publicMember = (m: any) => ({ ...m, passwordHash: undefined, totpSecret: undefined });
   api.get('/team', requirePartner, (_req, res) => res.json({ members: listTeam().map(publicMember) }));
-  api.post('/team', requirePartner, async (req, res) => {
+  api.post('/team', requirePartner, requireTeamAdmin, async (req, res) => {
     try {
       const { name, email, role, authType, mfaEnabled, password } = req.body ?? {};
       if (!name || !email) return res.status(400).json({ error: 'name and email are required' });
       if (authType === 'local' && (!password || String(password).length < 8)) return res.status(400).json({ error: 'local users need a password of at least 8 characters' });
       const passwordHash = authType === 'local' ? hashPassword(String(password)) : undefined;
       const m = await saveTeamMember({ name, email, role, authType, mfaEnabled: Boolean(mfaEnabled), passwordHash });
+      logReq(req, 'team.create', email, `${authType} · ${role}`);
       res.status(201).json(publicMember(m));
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
-  api.put('/team/:id', requirePartner, async (req, res) => {
+  api.put('/team/:id', requirePartner, requireTeamAdmin, async (req, res) => {
     try {
       const body = { ...req.body }; delete body.passwordHash; delete body.totpSecret; // never set these directly
       if (body.password) { if (String(body.password).length < 8) return res.status(400).json({ error: 'password too short' }); body.passwordHash = hashPassword(String(body.password)); delete body.password; }
@@ -143,7 +155,7 @@ export function buildApi() {
       res.json(publicMember(m));
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
-  api.delete('/team/:id', requirePartner, async (req, res) => { await deleteTeamMember(req.params.id); res.json({ ok: true }); });
+  api.delete('/team/:id', requirePartner, requireTeamAdmin, async (req, res) => { await deleteTeamMember(req.params.id); logReq(req, 'team.delete', req.params.id); res.json({ ok: true }); });
 
   // ---- Policy (templates + rules) ----
   // A partner sees/edits partner (global) scope. A customer sees global + its own,
@@ -197,7 +209,7 @@ export function buildApi() {
     res.json({ ok: true });
   });
   api.post('/policy/rules', requireAuth, async (req, res) => {
-    try { const { own } = policyScopes(req); const r = await saveRule({ ...req.body, id: undefined, scope: own }); res.status(201).json(r); }
+    try { const { own } = policyScopes(req); const r = await saveRule({ ...req.body, id: undefined, scope: own }); logReq(req, 'policy.rule.create', r.kind, (r.data.sender||'')); res.status(201).json(r); }
     catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
   api.put('/policy/rules/:id', requireAuth, async (req, res) => {
@@ -230,6 +242,7 @@ export function buildApi() {
       // Keep a customer's display name in sync with its General company name.
       const name = req.body?.settings?.general?.companyName;
       if (scope !== 'partner' && name && getCustomer(scope)) await editCustomer(scope, { name });
+      logReq(req, 'settings.update', scope);
       res.json({ ok: true });
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
@@ -253,6 +266,7 @@ export function buildApi() {
         name, primaryDomain: domain, products, integrationModel: integrationModel ?? 'api',
         mailboxes: Number(mailboxes) || 50,
       });
+      logReq(req, 'customer.create', c.name, c.primaryDomain);
       const { url } = buildConsentUrl(c.id);
       res.status(201).json({ customer: customerSummary(c), consentUrl: url });
     } catch (e) {
@@ -339,12 +353,13 @@ export function buildApi() {
   });
 
   // Delete a customer and all its data (offboarding). Partner only.
-  api.delete('/customers/:id', requirePartner, async (req, res) => {
+  api.delete('/customers/:id', requirePartner, requireTeamAdmin, async (req, res) => {
     try {
       const id = req.params.id;
       if (!getCustomer(id)) return res.status(404).json({ error: 'not found' });
       deleteConnection(id);
       await deleteCustomer(id);
+      logReq(req, 'customer.delete', id);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: (e as Error).message });
@@ -430,6 +445,7 @@ export function buildApi() {
       if (option === 'block_recipient' || option === 'block_org') {
         await saveRule({ scope: option === 'block_org' ? 'partner' : id, kind: 'block', data: { sender: m.fromAddress, comment: `Blocked via remediation (${m.subject})` } });
       }
+      logReq(req, 'mail.remediate', m.subject, `from ${m.fromAddress}` + (option !== 'plain' ? ` (+${option})` : ''), id);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
@@ -467,6 +483,7 @@ export function buildApi() {
       if (option === 'allow_recipient' || option === 'allow_org') {
         await saveRule({ scope: option === 'allow_org' ? 'partner' : id, kind: 'allow', data: { sender: m.fromAddress, comment: `Allowed via release (${m.subject})` } });
       }
+      logReq(req, 'mail.release', m.subject, `from ${m.fromAddress}` + (option!=='plain'?` (+${option})`:''), id);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
@@ -486,6 +503,7 @@ export function buildApi() {
       // remove from the local store so it leaves the quarantine list
       emailStore.messages.delete(mid); emailStore.analyses.delete(mid);
       if (dbEnabled()) { await import('./db/db').then(d => d.q('delete from messages where id=$1', [mid])); }
+      logReq(req, 'mail.delete', m.subject, `from ${m.fromAddress}` + (option!=='plain'?` (+${option})`:''), id);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });

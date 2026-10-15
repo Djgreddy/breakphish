@@ -12,7 +12,9 @@ import { newSession, setSessionCookie, clearSessionCookie } from './session';
 import { attachSession, sessionOf, requireAuth, requirePartner } from './middleware';
 import type { Identity, Session } from './identity';
 import { getTeamByEmail, updateTeamCreds } from '../team';
+import { audit } from '../audit';
 import { verifyPassword, generateTotpSecret, otpauthUri, verifyTotp } from './localAuth';
+import QRCode from 'qrcode';
 
 const provider = makeAuthProvider();
 const states = new Map<string, number>(); // entra CSRF states
@@ -54,9 +56,11 @@ export function buildAuthApp() {
     if (!verifyPassword(password, m.passwordHash)) return res.status(401).json({ error: 'invalid email or password' });
 
     const finish = () => {
-      const role = m.role === 'read_only' || m.role === 'analyst' ? 'partner_admin' : 'partner_admin';
-      const session = newSession({ sub: 'local:' + m.id, email: m.email, name: m.name, role });
+      // All partner staff get the partner_admin *scope*, but their teamRole limits
+      // what they can actually do (analyst / read_only enforced in middleware).
+      const session = newSession({ sub: 'local:' + m.id, email: m.email, name: m.name, role: 'partner_admin', teamRole: m.role });
       setSessionCookie(res, session);
+      audit({ actorEmail: m.email, role: m.role, action: 'auth.login', detail: 'local' + (m.mfaEnabled?' + MFA':'') });
       return res.json({ session: publicSession(session) });
     };
 
@@ -67,7 +71,13 @@ export function buildAuthApp() {
     if (!secret) { secret = generateTotpSecret(); await updateTeamCreds(m.id, { totpSecret: secret }); }
 
     if (!code) {
-      return res.json({ needsMfa: true, enroll: !m.totpEnabled, otpauthUri: !m.totpEnabled ? otpauthUri(secret, m.email) : undefined, secret: !m.totpEnabled ? secret : undefined });
+      if (!m.totpEnabled) {
+        const uri = otpauthUri(secret, m.email);
+        let qr: string | undefined;
+        try { qr = await QRCode.toDataURL(uri, { margin: 1, width: 200 }); } catch {}
+        return res.json({ needsMfa: true, enroll: true, otpauthUri: uri, secret, qr });
+      }
+      return res.json({ needsMfa: true, enroll: false });
     }
     if (!verifyTotp(secret, code)) return res.status(401).json({ error: 'invalid verification code' });
     if (!m.totpEnabled) await updateTeamCreds(m.id, { totpEnabled: true, status: 'active' });

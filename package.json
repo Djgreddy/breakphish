@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "BreakPhish MVP critical-path scaffold: M365 sync → send → tracked click → auto-training.",
+  "description": "BreakPhish MVP critical-path scaffold: M365 sync \u2192 send \u2192 tracked click \u2192 auto-training.",
   "scripts": {
     "demo": "tsx src/demo.ts",
     "demo:email": "tsx src/emailsec/demo.ts",
@@ -14,13 +14,15 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.7.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
-    "@types/pg": "^8.11.10"
+    "@types/pg": "^8.11.10",
+    "@types/qrcode": "^1.5.5"
   }
 }

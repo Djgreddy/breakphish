@@ -204,7 +204,7 @@ async function renderLogin(){
       if(!r.ok){showErr(d.error||'Sign-in failed');btn.disabled=false;btn.textContent='Sign in';return;}
       if(d.needsMfa){
         mfaBox.style.display='block';
-        if(d.enroll){enrollNote.style.display='block';enrollNote.innerHTML=`Set up your authenticator app. Add this key manually:<br><span class="mono" style="font-size:12px;word-break:break-all;color:var(--txt)">${d.secret}</span><br>then enter the 6-digit code.`;}
+        if(d.enroll){enrollNote.style.display='block';enrollNote.innerHTML=`Scan this with your authenticator app:${d.qr?`<br><img src="${d.qr}" style="width:170px;height:170px;margin:8px auto;display:block;background:#fff;border-radius:8px;padding:6px">`:''}<br>or add the key manually: <span class="mono" style="font-size:12px;word-break:break-all;color:var(--txt)">${d.secret}</span><br>then enter the 6-digit code.`;}
         else enrollNote.style.display='none';
         btn.textContent='Verify';btn.disabled=false;codeI.focus();return;
       }
@@ -279,7 +279,6 @@ function placeholderView(title,desc){
 const PLACEHOLDERS={
   'p-tracker':['Live Email Tracker','Aggregate inbound & outbound mail across all your customers.'],
   'p-invoices':['Invoices','Billing and usage invoices across your customers.'],
-  'p-audit':['Audit Logs','Every action taken in the console, with actor, resource, and result.'],
 };
 Object.entries(PLACEHOLDERS).forEach(([id,[t,d]])=>{VIEWS[id]=async()=>placeholderView(t,d);});
 
@@ -507,6 +506,27 @@ VIEWS.users=async function(){
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
+/* ---- Audit Logs ---- */
+VIEWS['p-audit']=async function(){
+  const v=el('<div></div>');
+  v.appendChild(el('<div class="ph"><h1>Audit Logs</h1><p>Every action taken in the console</p></div>'));
+  const card=el('<div class="card"></div>');
+  const filt=el('<div class="filters"><input id="asearch" placeholder="Search actor, action, resource…" style="flex:1;min-width:200px"></div>');
+  card.appendChild(filt);
+  const tbl=el('<table><thead><tr><th>Timestamp</th><th>Actor</th><th>Role</th><th>Action</th><th>Resource</th><th>Detail</th></tr></thead><tbody></tbody></table>');
+  const tb=tbl.querySelector('tbody');
+  async function load(q){
+    tb.innerHTML='<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--faint)">Loading…</td></tr>';
+    const {entries}=await api('/audit'+(q?'?q='+encodeURIComponent(q):''));
+    tb.innerHTML='';
+    if(!entries.length){tb.appendChild(el('<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--faint)">No audit entries.</td></tr>'));return;}
+    entries.forEach(e=>tb.appendChild(el(`<tr><td class="mono" style="color:var(--muted);white-space:nowrap">${new Date(e.at).toLocaleString()}</td><td>${e.actorEmail}</td><td><span class="pill p-muted">${e.role||'—'}</span></td><td><span class="mono" style="font-size:12px">${e.action}</span></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.resource||'—'}</td><td style="color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.detail||'—'}</td></tr>`)));
+  }
+  let adeb;filt.querySelector('#asearch').oninput=e=>{clearTimeout(adeb);adeb=setTimeout(()=>load(e.target.value.trim()),300);};
+  card.appendChild(tbl);v.appendChild(card);await load('');
+  return v;
+};
+
 /* ---- Analytics ---- */
 VIEWS['p-analytics']=analyticsView; VIEWS['analytics']=analyticsView;
 async function analyticsView(){
@@ -1026,7 +1046,10 @@ async function settingsDomains(){
 }
 async function settingsBanners(){
   const c=el('<div class="card p"></div>');
-  c.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin-bottom:14px">Warning banners shown on delivered mail. Use <span class="mono">{{sender}}</span> and <span class="mono">{{source}}</span> as placeholders. <b style="color:var(--txt)">Stored now; injection into delivered mail is the next step.</b></div>'));
+  c.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin-bottom:10px">Warning banners stamped into delivered external mail. Use <span class="mono">{{sender}}</span> and <span class="mono">{{source}}</span> as placeholders.</div>'));
+  if(SET.bannersEnabled===undefined)SET.bannersEnabled=false;
+  const enRow=el('<div style="display:flex;align-items:center;gap:14px;padding:10px 0 14px;border-bottom:1px solid var(--line2);margin-bottom:12px"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">Inject banners into mail</div><div style="font-size:11.5px;color:var(--faint)">When on, external delivered mail gets the verdict banner stamped at the top (real mailbox edit via Graph).</div></div></div>');
+  const enTog=makeToggle(Boolean(SET.bannersEnabled));enTog.onclick=(()=>{const o=enTog.onclick;return()=>{o&&o();SET.bannersEnabled=enTog._get();};})();enRow.appendChild(enTog);c.appendChild(enRow);
   function group(title, obj){
     c.appendChild(el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:4px 0 6px">${title}</div>`));
     const head=el('<div style="display:grid;grid-template-columns:150px 46px 1fr;gap:10px;font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:0 0 6px"><div>Name</div><div>Color</div><div>Message</div></div>');

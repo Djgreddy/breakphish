@@ -14,6 +14,7 @@ export interface Session {
   email: string;
   name: string;
   role: Role;
+  teamRole?: 'partner_admin' | 'analyst' | 'read_only'; // partner-staff permission level (SSO = full)
   customerId?: string;  // set for administrators (own org, or one being impersonated)
   impersonating?: boolean;
   actor?: { sub: string; email: string; name: string }; // the partner, while impersonating

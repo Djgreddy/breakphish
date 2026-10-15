@@ -12,9 +12,25 @@ import { store } from '../store';
 import { getConnection } from '../consent';
 import { analyze } from './pipeline';
 import { emailStore } from './store';
-import { applyDisposition } from './mailActions';
+import { applyDisposition, prependBanner } from './mailActions';
 import { getSettings } from '../settings';
 import type { Message } from './types';
+
+// Pick the banner for a scored message and stamp it, if the customer enabled it.
+const BANNER_FOR: Record<string, string> = {
+  clean: 'Clean', spam: 'Spam-Definite', spam_likely: 'Spam-Likely', phishing: 'Phishing',
+  malware: 'Malware', impersonation: 'Impersonation', policy_infomail: 'Infomail', policy_geo: 'Policy-Geo',
+};
+async function maybeStampBanner(tenantId: string, entraTenantId: string, userId: string, ref: { graphId: string; internetMessageId?: string }, msg: Message, analysis: { verdict: string }): Promise<void> {
+  const st = getSettings(tenantId);
+  if (!st.bannersEnabled) return;
+  if (msg.source !== 'external') return;           // only external mail
+  const key = BANNER_FOR[analysis.verdict]; if (!key) return;
+  const b = st.banners.verdict[key]; if (!b || !b.message) return;
+  const text = b.message.replace(/\{\{sender\}\}/g, msg.fromAddress).replace(/\{\{source\}\}/g, msg.source);
+  const html = `<div style="border-left:4px solid ${b.color};background:#fff8e1;color:#5c4400;padding:10px 14px;margin:0 0 10px;font-family:Segoe UI,Arial,sans-serif;font-size:13px;border-radius:4px">${text}</div>`;
+  await prependBanner(entraTenantId, userId, ref, html);
+}
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 
@@ -108,10 +124,14 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
     // sentitems lack receivedDateTime — fall back to sentDateTime.
     if (!m.receivedDateTime && m.sentDateTime) m.receivedDateTime = m.sentDateTime;
     if (emailStore.analysisFor(m.id)) continue; // already scored — skip
-    const analysis = await analyze(normalize(tenantId, verifiedDomains, m, folder));
+    const msg = normalize(tenantId, verifiedDomains, m, folder);
+    const analysis = await analyze(msg);
+    const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
     // Enforce: act on the real mailbox for inbound mail the policy junks/quarantines.
     if (folder === 'inbox' && ['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
-      await applyDisposition(entraTenantId, userId, { graphId: m.id, internetMessageId: m.internetMessageId }, analysis.disposition);
+      await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
+    } else if (folder === 'inbox') {
+      await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
     }
     scored++;
   }
@@ -139,9 +159,13 @@ export async function ingestOneMessage(tenantId: string, entraTenantId: string, 
   if (!res.ok) { console.error(`[webhook] fetch message failed ${res.status}`); return null; }
   const m = await res.json();
   const internalDomains = [...t.verifiedDomains, ...getSettings(tenantId).managedDomains];
-  const analysis = await analyze(normalize(tenantId, internalDomains, m, 'inbox'));
+  const msg = normalize(tenantId, internalDomains, m, 'inbox');
+  const analysis = await analyze(msg);
+  const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
   if (['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
-    await applyDisposition(entraTenantId, userId, { graphId: m.id, internetMessageId: m.internetMessageId }, analysis.disposition);
+    await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
+  } else {
+    await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
   }
   return analysis.disposition;
 }

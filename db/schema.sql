@@ -247,3 +247,6 @@ alter table team_members add column if not exists status text not null default '
 alter table team_members add column if not exists password_hash text;
 alter table team_members add column if not exists totp_secret   text;
 alter table team_members add column if not exists totp_enabled  boolean not null default false;
+
+-- audit detail column
+alter table audit_log add column if not exists detail text;

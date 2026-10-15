@@ -85,6 +85,34 @@ export function makeMailActions(): MailActions {
   return config.directoryProvider === 'graph' ? new GraphMailActions() : new MockMailActions();
 }
 
+// Stamp a warning banner into the top of a message body (HTML). Idempotent via a
+// marker comment so a re-scan won't double-stamp.
+const BANNER_MARK = 'data-bp-banner';
+export async function prependBanner(entraTenantId: string, userId: string, ref: MsgRef, bannerHtml: string): Promise<boolean> {
+  if (config.directoryProvider !== 'graph') { console.log(`[banner:mock] stamp ${userId} ${ref.graphId}`); return true; }
+  try {
+    const token = await appToken(entraTenantId);
+    // resolve current id + read current body
+    const imid = ref.internetMessageId ? `?$filter=internetMessageId eq '${ref.internetMessageId.replace(/'/g, "''")}'&$select=id,body` : '';
+    let id = ref.graphId, body = '';
+    if (imid) {
+      const f = await fetch(`${GRAPH}/users/${encodeURIComponent(userId)}/messages${imid}&$top=1`, { headers: { authorization: `Bearer ${token}` } });
+      if (f.ok) { const j: any = await f.json(); if (j.value?.[0]) { id = j.value[0].id; body = j.value[0].body?.content ?? ''; } }
+    } else {
+      const f = await fetch(`${GRAPH}/users/${encodeURIComponent(userId)}/messages/${id}?$select=id,body`, { headers: { authorization: `Bearer ${token}` } });
+      if (f.ok) { const j: any = await f.json(); body = j.body?.content ?? ''; }
+    }
+    if (body.includes(BANNER_MARK)) return true; // already stamped
+    const stamped = `<div ${BANNER_MARK}="1">${bannerHtml}</div>` + body;
+    const res = await fetch(`${GRAPH}/users/${encodeURIComponent(userId)}/messages/${id}`, {
+      method: 'PATCH', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: { contentType: 'html', content: stamped } }),
+    });
+    if (!res.ok) { console.error(`[banner] patch failed ${res.status}`); return false; }
+    return true;
+  } catch (e) { console.error('[banner] failed', (e as Error).message); return false; }
+}
+
 // Apply a disposition to the real mailbox. Returns true if it acted without error.
 export async function applyDisposition(entraTenantId: string, userId: string, ref: MsgRef, disposition: string): Promise<boolean> {
   try {

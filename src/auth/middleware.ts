@@ -30,6 +30,26 @@ export function requirePartner(req: Request, res: Response, next: NextFunction) 
   next();
 }
 
+// Read-only team members may only GET. Blocks every mutating method.
+export function blockReadOnlyWrites(req: Request, res: Response, next: NextFunction) {
+  const s = sessionOf(req);
+  if (s?.teamRole === 'read_only' && req.method !== 'GET' && req.method !== 'HEAD') {
+    return res.status(403).json({ error: 'read-only access: this action is not permitted for your role' });
+  }
+  next();
+}
+
+// Admin-only actions (team management, deleting customers, partner settings).
+// SSO/customer sessions (no teamRole) are treated as full admins.
+export function requireTeamAdmin(req: Request, res: Response, next: NextFunction) {
+  const s = sessionOf(req);
+  if (!s) return res.status(401).json({ error: 'not authenticated' });
+  if (s.teamRole && s.teamRole !== 'partner_admin') {
+    return res.status(403).json({ error: 'administrator role required for this action' });
+  }
+  next();
+}
+
 // For /customers/:id routes — partner sees all, administrator only their scope.
 export function requireCustomerAccess(req: Request, res: Response, next: NextFunction) {
   const s = sessionOf(req);
