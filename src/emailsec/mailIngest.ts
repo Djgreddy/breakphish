@@ -12,8 +12,11 @@ import { store } from '../store';
 import { getConnection } from '../consent';
 import { analyze } from './pipeline';
 import { emailStore } from './store';
-import { applyDisposition, prependBanner } from './mailActions';
+import { applyDisposition, prependBanner, rewriteLinks } from './mailActions';
 import { getSettings } from '../settings';
+import { dlpMatch, hasActiveLinkRewrite } from '../policy';
+import { audit } from '../audit';
+import { config } from '../config';
 import type { Message } from './types';
 
 // Pick the banner for a scored message and stamp it, if the customer enabled it.
@@ -132,6 +135,13 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
       await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
     } else if (folder === 'inbox') {
       await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
+      if (hasActiveLinkRewrite(tenantId)) await rewriteLinks(entraTenantId, userId, ref, config.publicBaseUrl);
+    } else if (folder === 'sentitems') {
+      const dlp = dlpMatch(tenantId, msg);
+      if (dlp) {
+        audit({ action: 'dlp.match', resource: msg.subject, detail: `outbound to ${msg.to} matched DLP rule`, customerId: tenantId });
+        if (dlp.data.action === 'quarantine') await applyDisposition(entraTenantId, userId, ref, 'quarantine');
+      }
     }
     scored++;
   }
@@ -166,6 +176,7 @@ export async function ingestOneMessage(tenantId: string, entraTenantId: string, 
     await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
   } else {
     await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
+    if (hasActiveLinkRewrite(tenantId)) await rewriteLinks(entraTenantId, userId, ref, config.publicBaseUrl);
   }
   return analysis.disposition;
 }

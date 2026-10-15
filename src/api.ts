@@ -96,24 +96,44 @@ export function buildApi() {
     const s = sessionOf(req)!;
     const scope = s.role === 'partner_admin' ? String(req.query.scope ?? 'all') : s.customerId!;
     const THREATS = ['phishing', 'malware', 'impersonation'];
-    const msgs = [...emailStore.messages.values()].filter(m => scope === 'all' || m.tenantId === scope);
+    // date range
+    const range = String(req.query.range ?? '30d');
+    let from = 0;
+    const now = Date.now();
+    if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); from = d.getTime(); }
+    else if (range === '7d') from = now - 7 * 864e5;
+    else if (range === '30d') from = now - 30 * 864e5;
+    else if (range === 'last_month') { const d = new Date(); from = new Date(d.getFullYear(), d.getMonth() - 1, 1).getTime(); }
+    const to = range === 'last_month' ? new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() : now + 864e5;
+    const msgs = [...emailStore.messages.values()].filter(m => (scope === 'all' || m.tenantId === scope) && (() => { const t = Date.parse(m.receivedAt || ''); return !from || (t >= from && t <= to); })());
     const verdicts: Record<string, number> = {};
     const dispositions: Record<string, number> = {};
     const byDay: Record<string, { total: number; threats: number }> = {};
     const threatSenders: Record<string, number> = {};
-    let processed = 0, threats = 0, quarantined = 0, clean = 0;
+    const geo: Record<string, number> = {};
+    const mailboxes: Record<string, number> = {};
+    let processed = 0, threats = 0, quarantined = 0, clean = 0, msCaught = 0, spam = 0, policy = 0;
     for (const m of msgs) {
       const a = emailStore.analysisFor(m.id); if (!a) continue;
       processed++;
       verdicts[a.verdict] = (verdicts[a.verdict] ?? 0) + 1;
       dispositions[a.disposition] = (dispositions[a.disposition] ?? 0) + 1;
       if (a.verdict === 'clean') clean++;
+      if (a.verdict === 'spam' || a.verdict === 'spam_likely') spam++;
+      if (a.verdict === 'policy_infomail' || a.verdict === 'policy_geo') policy++;
       const isThreat = THREATS.includes(a.verdict);
       if (isThreat) { threats++; threatSenders[m.fromAddress] = (threatSenders[m.fromAddress] ?? 0) + 1; }
       if (a.disposition === 'quarantine' || a.disposition === 'remediated') quarantined++;
+      if (m.msVerdict && m.msVerdict !== 'Not Spam') msCaught++;
+      if (m.senderCountry) geo[m.senderCountry] = (geo[m.senderCountry] ?? 0) + 1;
+      if (m.direction === 'inbound' && m.to) mailboxes[m.to] = (mailboxes[m.to] ?? 0) + 1;
       const day = (m.receivedAt || '').slice(0, 10);
       if (day) { (byDay[day] ??= { total: 0, threats: 0 }).total++; if (isThreat) byDay[day].threats++; }
     }
+    const nonClean = processed - clean;
+    const geoList = Object.entries(geo).sort(([, a], [, b]) => b - a).slice(0, 10).map(([country, count]) => ({ country, count }));
+    const targetedMailboxes = Object.entries(mailboxes).sort(([, a], [, b]) => b - a).slice(0, 10).map(([mailbox, count]) => ({ mailbox, count }));
+    const daysSaved = Math.round((nonClean * 20) / 86400); // ~20s saved per non-clean email
     const timeline = Object.entries(byDay).sort(([a], [b]) => a < b ? -1 : 1).slice(-14).map(([day, v]) => ({ day, ...v }));
     const topSenders = Object.entries(threatSenders).sort(([, a], [, b]) => b - a).slice(0, 8).map(([sender, count]) => ({ sender, count }));
     // per-customer rollup (partner only)
@@ -126,10 +146,12 @@ export function buildApi() {
         })
       : [];
     res.json({
-      scope, processed, threats, quarantined, clean,
+      scope, range, processed, threats, quarantined, clean, spam, policy,
+      nonClean, daysSaved, msCaught,
       cleanRate: processed ? Math.round((clean / processed) * 100) : 0,
       catchRate: processed ? Math.round((quarantined / processed) * 100) : 0,
-      verdicts, dispositions, timeline, topSenders, perCustomer,
+      verdicts, dispositions, timeline, topSenders, perCustomer, geo: geoList, targetedMailboxes,
+      generatedAt: new Date().toISOString(),
     });
   });
 

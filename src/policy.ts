@@ -179,6 +179,37 @@ function allowBlock(tenantId: string, fromAddress: string): 'allow' | 'block' | 
 
 const EXEC_EXT = ['.exe','.zip','.iso','.js','.scr','.bat','.cmd','.msi'];
 
+function wildMatch(pattern: string, text: string): boolean {
+  if (!pattern) return false;
+  if (pattern.includes('*')) {
+    const re = new RegExp('^' + pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$', 'i');
+    return re.test(text);
+  }
+  return text.toLowerCase().includes(pattern.toLowerCase());
+}
+const DLP_PATTERNS: Record<string, RegExp> = {
+  ssn: /\b\d{3}-\d{2}-\d{4}\b/,
+  credit_card: /\b(?:\d[ -]*?){13,16}\b/,
+  iban: /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/,
+};
+// Outbound DLP: does any active DLP rule match this message?
+export function dlpMatch(tenantId: string, msg: { subject?: string; bodyText?: string; urls?: string[] }): PolicyRule | null {
+  for (const r of rules.values()) {
+    if (r.kind !== 'dlp' || !ruleAppliesTo(r, tenantId)) continue;
+    const d = r.data;
+    const subj = (d.subjects ?? []).some((p: string) => wildMatch(p, msg.subject ?? ''));
+    const url = (d.urls ?? []).some((p: string) => (msg.urls ?? []).some(u => wildMatch(p, u)));
+    const body = (d.bodyRules ?? []).some((p: string) => wildMatch(p, msg.bodyText ?? ''));
+    let pat = false;
+    if (d.dlpPattern && DLP_PATTERNS[d.dlpPattern]) pat = DLP_PATTERNS[d.dlpPattern].test(msg.bodyText ?? '');
+    if (subj || url || body || pat) return r;
+  }
+  return null;
+}
+export function hasActiveLinkRewrite(tenantId: string): boolean {
+  return [...rules.values()].some(r => r.kind === 'link_rewrite' && ruleAppliesTo(r, tenantId) && r.data.active !== false);
+}
+
 // Decide the disposition for a scored message under the active policy.
 export function dispositionFor(
   tenantId: string, verdict: string,

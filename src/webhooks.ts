@@ -52,5 +52,17 @@ export function buildWebhookApp() {
   const jsonBody = express.json({ type: () => true, limit: '1mb' });
   app.get('/webhooks/graph', echoValidation, handler);
   app.post('/webhooks/graph', echoValidation, jsonBody, handler);
+
+  // Link-rewrite protection redirect. Rewritten links in mail point here; we log
+  // the click and forward to the real URL (an interstitial could warn for risky ones).
+  app.get('/l', (req, res) => {
+    const target = String(req.query.u ?? '');
+    let url: URL;
+    try { url = new URL(target); } catch { return res.status(400).send('Invalid link'); }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return res.status(400).send('Blocked link');
+    console.log(`[linkrw] click → ${url.hostname}`);
+    res.redirect(302, url.toString());
+  });
+
   return app;
 }

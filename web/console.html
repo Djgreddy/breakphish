@@ -529,18 +529,48 @@ VIEWS['p-audit']=async function(){
 
 /* ---- Analytics ---- */
 VIEWS['p-analytics']=analyticsView; VIEWS['analytics']=analyticsView;
+let ANA_SCOPE='all', ANA_RANGE='30d';
+const ANA_RANGES=[['today','Today'],['7d','Last 7 days'],['30d','Last 30 days'],['last_month','Last calendar month']];
 async function analyticsView(){
-  const a=await api('/analytics');
+  const isPartner=STATE.role==='partner';
+  if(!isPartner)ANA_SCOPE=STATE.customerId;
   const v=el('<div></div>');
-  v.appendChild(el(`<div class="ph"><h1>Analytics</h1><p>${STATE.role==='partner'?'Across all customers':STATE._cust.name} · ${a.processed} messages analyzed</p></div>`));
+  v.appendChild(el(`<div class="ph"><h1>Analytics</h1><p>Executive summary report</p></div>`));
+  // controls
+  const ctrls=el('<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px"></div>');
+  if(isPartner){
+    const custSel=el('<select style="min-width:220px"><option value="all">All customers</option></select>');
+    try{const list=await api('/customers');list.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.name;if(c.id===ANA_SCOPE)o.selected=true;custSel.appendChild(o);});}catch(e){}
+    custSel.value=ANA_SCOPE;custSel.onchange=()=>{ANA_SCOPE=custSel.value;go(isPartner?'p-analytics':'analytics');};
+    ctrls.appendChild(custSel);
+  }
+  const rangeSel=el('<select style="min-width:180px">'+ANA_RANGES.map(([v2,l])=>`<option value="${v2}" ${ANA_RANGE===v2?'selected':''}>${l}</option>`).join('')+'</select>');
+  rangeSel.onchange=()=>{ANA_RANGE=rangeSel.value;go(isPartner?'p-analytics':'analytics');};
+  ctrls.appendChild(rangeSel);
+  ctrls.appendChild(el('<div style="flex:1"></div>'));
+  const pdfBtn=el('<button class="btn sm">⬇ PDF</button>');const jsonBtn=el('<button class="btn sm">⬇ JSON</button>');
+  ctrls.appendChild(pdfBtn);ctrls.appendChild(jsonBtn);
+  v.appendChild(ctrls);
+
+  const a=await api('/analytics?scope='+encodeURIComponent(ANA_SCOPE)+'&range='+ANA_RANGE);
+  pdfBtn.onclick=()=>analyticsPdf(a);
+  jsonBtn.onclick=()=>{const blob=new Blob([JSON.stringify(a,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const link=document.createElement('a');link.href=u;link.download='analytics.json';link.click();URL.revokeObjectURL(u);};
+  const rangeLabel=(ANA_RANGES.find(r=>r[0]===ANA_RANGE)||[])[1]||'';
+  v.appendChild(el(`<div style="font-size:13px;color:var(--muted);margin-bottom:14px">${isPartner?(ANA_SCOPE==='all'?'All customers':'Customer: '+ANA_SCOPE):STATE._cust.name} · ${rangeLabel} · ${a.processed} messages</div>`));
   // summary cards
   const cards=el('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px"></div>');
-  const card=(label,val,sub,color)=>el(`<div class="card p"><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">${label}</div><div style="font-size:28px;font-weight:700;margin:4px 0;${color?`color:${color}`:''}">${val}</div><div style="font-size:12px;color:var(--muted)">${sub||''}</div></div>`);
-  cards.appendChild(card('Processed',a.processed,'messages analyzed'));
+  const card=(label,val,sub,color)=>el(`<div class="card p"><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">${label}</div><div style="font-size:26px;font-weight:700;margin:4px 0;${color?`color:${color}`:''}">${val}</div><div style="font-size:12px;color:var(--muted)">${sub||''}</div></div>`);
+  cards.appendChild(card('Productivity',a.daysSaved+'+ days',`saved (~20s per non-clean email)`,'var(--brand)'));
   cards.appendChild(card('Threats',a.threats,'phishing · malware · impersonation',a.threats?'var(--danger)':''));
   cards.appendChild(card('Quarantined',a.quarantined,`${a.catchRate}% of mail acted on`,'var(--warn)'));
-  cards.appendChild(card('Clean rate',a.cleanRate+'%',`${a.clean} clean messages`,'var(--ok)'));
+  cards.appendChild(card('Microsoft caught',a.msCaught,'flagged by Microsoft too','var(--muted)'));
   v.appendChild(cards);
+  const cards2=el('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px"></div>');
+  cards2.appendChild(card('Clean',a.clean.toLocaleString(),a.cleanRate+'% of mail','var(--ok)'));
+  cards2.appendChild(card('Spam',a.spam.toLocaleString(),'spam + spam-likely','var(--warn)'));
+  cards2.appendChild(card('Policy',a.policy.toLocaleString(),'infomail + geo','var(--info)'));
+  cards2.appendChild(card('Processed',a.processed.toLocaleString(),'total analyzed'));
+  v.appendChild(cards2);
   const grid=el('<div class="grid2"></div>');
   // verdict breakdown (bars)
   const vc=el('<div class="card"><div class="card-h"><h3>Verdict breakdown</h3></div></div>');
@@ -568,7 +598,7 @@ async function analyticsView(){
   a.topSenders.forEach(s=>sbd.appendChild(el(`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.sender}</span><span class="pill p-danger">${s.count}</span></div>`)));
   if(!a.topSenders.length)sbd.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No threats detected.</div>'));
   sc.appendChild(sbd);grid2.appendChild(sc);
-  if(STATE.role==='partner'&&a.perCustomer.length){
+  if(STATE.role==='partner'&&a.perCustomer.length&&ANA_SCOPE==='all'){
     const pc=el('<div class="card"><div class="card-h"><h3>By customer</h3></div></div>');
     const pbd=el('<div class="pad0"></div>');
     const ptbl=el('<table><thead><tr><th>Customer</th><th>Processed</th><th>Threats</th><th>Quarantined</th></tr></thead><tbody></tbody></table>');
@@ -577,7 +607,45 @@ async function analyticsView(){
     pbd.appendChild(ptbl);pc.appendChild(pbd);grid2.appendChild(pc);
   }
   v.appendChild(grid2);
+  // Geo + Targeted mailboxes
+  const grid3=el('<div class="grid2" style="margin-top:16px"></div>');
+  const geoC=el('<div class="card"><div class="card-h"><h3>Geo (sender country)</h3></div></div>');
+  const geoB=el('<div style="padding:6px 18px 14px"></div>');
+  const geoMax=Math.max(1,...a.geo.map(g=>g.count));
+  a.geo.forEach(g=>geoB.appendChild(el(`<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>${g.country}</span><span class="mono" style="color:var(--muted)">${g.count.toLocaleString()}</span></div><div style="height:6px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.round(g.count/geoMax*100)}%;background:var(--warn)"></div></div></div>`)));
+  if(!a.geo.length)geoB.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No geo data (external mail only).</div>'));
+  geoC.appendChild(geoB);grid3.appendChild(geoC);
+  const tmC=el('<div class="card"><div class="card-h"><h3>Targeted mailboxes</h3></div></div>');
+  const tmB=el('<div style="padding:6px 18px 14px"></div>');
+  a.targetedMailboxes.forEach(t=>tmB.appendChild(el(`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.mailbox}</span><span class="mono" style="color:var(--muted)">${t.count.toLocaleString()}</span></div>`)));
+  if(!a.targetedMailboxes.length)tmB.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No data yet.</div>'));
+  tmC.appendChild(tmB);grid3.appendChild(tmC);
+  v.appendChild(grid3);
   return v;
+}
+// Open a printable report → user saves as PDF via the browser.
+function analyticsPdf(a){
+  const w=window.open('','_blank');if(!w){toast('Allow pop-ups to export PDF');return;}
+  const row=(k,v)=>`<tr><td style="padding:6px 10px;color:#555">${k}</td><td style="padding:6px 10px;font-weight:600;text-align:right">${v}</td></tr>`;
+  const verdictRows=Object.entries(a.verdicts).sort((x,y)=>y[1]-x[1]).map(([k,n])=>row(k,n.toLocaleString())).join('');
+  const geoRows=a.geo.map(g=>row(g.country,g.count.toLocaleString())).join('');
+  const mbRows=a.targetedMailboxes.map(t=>row(t.mailbox,t.count.toLocaleString())).join('');
+  w.document.write(`<html><head><title>BreakPhish Analytics</title><style>body{font-family:Arial,sans-serif;color:#222;padding:30px;max-width:800px;margin:auto}h1{font-size:22px}h2{font-size:15px;margin-top:24px;border-bottom:2px solid #4f46e5;padding-bottom:4px}table{width:100%;border-collapse:collapse;margin-top:8px}.cards{display:flex;gap:12px;flex-wrap:wrap}.c{flex:1;min-width:140px;border:1px solid #eee;border-radius:8px;padding:12px}.c .n{font-size:24px;font-weight:700}.c .l{font-size:11px;color:#888;text-transform:uppercase}</style></head><body>
+    <h1>BreakPhish — Executive Summary</h1>
+    <div style="color:#666;font-size:13px">${a.scope==='all'?'All customers':'Customer: '+a.scope} · ${a.range} · generated ${new Date(a.generatedAt).toLocaleString()}</div>
+    <div class="cards" style="margin-top:16px">
+      <div class="c"><div class="l">Processed</div><div class="n">${a.processed.toLocaleString()}</div></div>
+      <div class="c"><div class="l">Threats</div><div class="n" style="color:#e11d48">${a.threats}</div></div>
+      <div class="c"><div class="l">Quarantined</div><div class="n" style="color:#c9820a">${a.quarantined}</div></div>
+      <div class="c"><div class="l">Clean rate</div><div class="n" style="color:#15a34a">${a.cleanRate}%</div></div>
+      <div class="c"><div class="l">Days saved</div><div class="n">${a.daysSaved}+</div></div>
+    </div>
+    <h2>Verdict breakdown</h2><table>${verdictRows||'<tr><td>No data</td></tr>'}</table>
+    <h2>Geo (sender country)</h2><table>${geoRows||'<tr><td>No data</td></tr>'}</table>
+    <h2>Targeted mailboxes</h2><table>${mbRows||'<tr><td>No data</td></tr>'}</table>
+    <p style="margin-top:30px;color:#999;font-size:11px">Generated by BreakPhish Security</p>
+    <script>setTimeout(()=>window.print(),400)</script></body></html>`);
+  w.document.close();
 }
 
 /* ---- Team Members (partner) ---- */

@@ -85,6 +85,32 @@ export function makeMailActions(): MailActions {
   return config.directoryProvider === 'graph' ? new GraphMailActions() : new MockMailActions();
 }
 
+// Rewrite links in a message body so clicks pass through BreakPhish's protection
+// redirect. Idempotent (skips already-rewritten bodies).
+const REWRITE_MARK = 'data-bp-links';
+export async function rewriteLinks(entraTenantId: string, userId: string, ref: MsgRef, baseUrl: string): Promise<boolean> {
+  if (config.directoryProvider !== 'graph') { console.log(`[linkrw:mock] rewrite ${userId} ${ref.graphId}`); return true; }
+  try {
+    const token = await appToken(entraTenantId);
+    const sel = ref.internetMessageId
+      ? `?$filter=internetMessageId eq '${ref.internetMessageId.replace(/'/g, "''")}'&$select=id,body&$top=1`
+      : null;
+    let id = ref.graphId, body = '';
+    if (sel) { const f = await fetch(`${GRAPH}/users/${encodeURIComponent(userId)}/messages${sel}`, { headers: { authorization: `Bearer ${token}` } }); if (f.ok) { const j: any = await f.json(); if (j.value?.[0]) { id = j.value[0].id; body = j.value[0].body?.content ?? ''; } } }
+    else { const f = await fetch(`${GRAPH}/users/${encodeURIComponent(userId)}/messages/${id}?$select=id,body`, { headers: { authorization: `Bearer ${token}` } }); if (f.ok) { const j: any = await f.json(); body = j.body?.content ?? ''; } }
+    if (!body || body.includes(REWRITE_MARK)) return true;
+    const rewritten = body.replace(/href\s*=\s*"(https?:\/\/[^"]+)"/gi, (_m, url) => `href="${baseUrl}/l?u=${encodeURIComponent(url)}"`);
+    if (rewritten === body) return true;
+    const stamped = `<!--${REWRITE_MARK}-->` + rewritten;
+    const res = await fetch(`${GRAPH}/users/${encodeURIComponent(userId)}/messages/${id}`, {
+      method: 'PATCH', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: { contentType: 'html', content: stamped } }),
+    });
+    if (!res.ok) { console.error(`[linkrw] patch failed ${res.status}`); return false; }
+    return true;
+  } catch (e) { console.error('[linkrw] failed', (e as Error).message); return false; }
+}
+
 // Stamp a warning banner into the top of a message body (HTML). Idempotent via a
 // marker comment so a re-scan won't double-stamp.
 const BANNER_MARK = 'data-bp-banner';
