@@ -8,6 +8,7 @@ import { emailStore } from '../emailsec/store';
 import {
   loadUsers, loadGroups, upsertUserRow, upsertGroupRow,
   loadMessages, loadAnalyses, upsertMessageRow, upsertAnalysisRow,
+  loadReleased,
 } from './persist';
 
 // ---- load on boot ----
@@ -44,6 +45,7 @@ export async function hydrateEmail(): Promise<{ messages: number; analyses: numb
       disposition: r.disposition, remediated: r.remediated, signals: r.signals ?? [],
     });
   }
+  for (const imid of await loadReleased()) emailStore.markReleased(imid);
   return { messages: msgs.length, analyses: analyses.length };
 }
 

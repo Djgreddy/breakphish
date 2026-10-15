@@ -97,10 +97,14 @@ export function listRules(scopes: string[], kind?: string): PolicyRule[] {
 }
 export async function saveRule(input: Partial<PolicyRule> & { scope: string; kind: string }): Promise<PolicyRule> {
   const existing = input.id ? rules.get(input.id) : undefined;
+  const data = { ...(existing?.data ?? {}), ...(input.data ?? {}) };
+  // An explicit top-level `enabled` wins; otherwise mirror the rule's `active`
+  // flag (so toggling Active in the editor actually disables enforcement).
+  const enabled = input.enabled ?? (data.active !== undefined ? data.active !== false : existing?.enabled ?? true);
   const r: PolicyRule = {
     id: input.id ?? randomUUID(), scope: input.scope, kind: input.kind,
-    data: { ...(existing?.data ?? {}), ...(input.data ?? {}) },
-    enabled: input.enabled ?? existing?.enabled ?? true,
+    data,
+    enabled,
     createdBy: existing?.createdBy ?? input.createdBy ?? 'partner',
     createdAt: existing?.createdAt ?? new Date().toISOString(),
   };
@@ -130,14 +134,11 @@ function matchesSender(rule: PolicyRule, fromAddress: string): boolean {
     return fromAddress === s || dom === bare || dom.endsWith('.' + bare) || s === '@' + dom;
   });
 }
-// customer rules first (win), then partner.
+// Allow wins over block. Only ENABLED rules count. Customer + partner scopes apply.
 function allowBlock(tenantId: string, fromAddress: string): 'allow' | 'block' | null {
-  for (const scope of [tenantId, 'partner']) {
-    for (const r of rules.values()) {
-      if (r.scope !== scope || !r.enabled) continue;
-      if ((r.kind === 'allow' || r.kind === 'block') && matchesSender(r, fromAddress)) return r.kind === 'allow' ? 'allow' : 'block';
-    }
-  }
+  const active = [...rules.values()].filter(r => r.enabled && (r.scope === tenantId || r.scope === 'partner'));
+  if (active.some(r => r.kind === 'allow' && matchesSender(r, fromAddress))) return 'allow';
+  if (active.some(r => r.kind === 'block' && matchesSender(r, fromAddress))) return 'block';
   return null;
 }
 

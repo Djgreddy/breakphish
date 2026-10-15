@@ -216,3 +216,10 @@ create table if not exists graph_subscriptions (
   created_at   timestamptz not null default now()
 );
 create index if not exists graph_subscriptions_cust_idx on graph_subscriptions(customer_id);
+
+-- messages an admin manually released (policy is not re-applied to these)
+create table if not exists released_overrides (
+  internet_message_id text primary key,
+  tenant_id           text,
+  at                  timestamptz not null default now()
+);

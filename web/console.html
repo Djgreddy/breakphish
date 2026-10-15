@@ -572,15 +572,17 @@ async function polRules(kind,title){
   const head=el('<div style="display:flex;margin-bottom:12px"><div style="flex:1"></div></div>');
   const nb=el('<button class="btn primary sm">+ New rule</button>');nb.onclick=()=>openRuleEditor(kind,title,null);head.appendChild(nb);v.appendChild(head);
   const card=el('<div class="card pad0" style="overflow:hidden"></div>');
-  const tbl=el('<table><thead><tr><th>Comment</th><th>Senders / match</th><th>Action</th><th>Scope</th><th>Created</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
+  const tbl=el('<table><thead><tr><th>Status</th><th>Comment</th><th>Senders / match</th><th>Action</th><th>Scope</th><th>Created</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
   const tb=tbl.querySelector('tbody');
-  if(!rules.length)tb.appendChild(el('<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--faint)">No results.</td></tr>'));
+  if(!rules.length)tb.appendChild(el('<tr><td colspan="7" style="padding:30px;text-align:center;color:var(--faint)">No results.</td></tr>'));
   rules.forEach(r=>{
     const actLbl=kind==='allow'?'Allow (Deliver)':kind==='block'?'Block (Quarantine)':(r.data.action||'—');
-    const row=el(`<tr><td>${r.data.comment||'—'}</td><td style="color:var(--muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ruleMatch(r)}</td><td><span class="pill p-muted">${actLbl}</span></td><td><span class="pill p-muted">${r.scope==='partner'?'Global':'Customer'}</span></td><td class="mono" style="color:var(--muted)">${new Date(r.createdAt).toLocaleDateString()}</td><td style="text-align:right;white-space:nowrap"></td></tr>`);
-    const act=row.children[5];
+    const statusPill=r.enabled?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span>':'<span class="pill p-muted">Disabled</span>';
+    const row=el(`<tr><td>${statusPill}</td><td>${r.data.comment||'—'}</td><td style="color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ruleMatch(r)}</td><td><span class="pill p-muted">${actLbl}</span></td><td><span class="pill p-muted">${r.scope==='partner'?'Global':'Customer'}</span></td><td class="mono" style="color:var(--muted)">${new Date(r.createdAt).toLocaleDateString()}</td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+    const act=row.children[6];
     if(r.editable){
-      const ed=el('<button class="btn sm">Edit</button>');ed.onclick=()=>openRuleEditor(kind,title,r);act.appendChild(ed);
+      const tg=el(`<button class="btn sm">${r.enabled?'Disable':'Enable'}</button>`);tg.onclick=async()=>{try{await api('/policy/rules/'+r.id,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({kind:r.kind,enabled:!r.enabled,data:{...r.data,active:!r.enabled}})});toast(r.enabled?'Rule disabled':'Rule enabled');go(STATE.role==='partner'?'p-policy':'policy');}catch(e){toast('Failed: '+e.message);}};act.appendChild(tg);
+      const ed=el('<button class="btn sm" style="margin-left:6px">Edit</button>');ed.onclick=()=>openRuleEditor(kind,title,r);act.appendChild(ed);
       const del=el('<button class="btn sm" style="margin-left:6px;color:var(--danger)">✕</button>');del.onclick=async()=>{if(!confirm('Delete rule?'))return;await api('/policy/rules/'+r.id,{method:'DELETE'});go(STATE.role==='partner'?'p-policy':'policy');};act.appendChild(del);
     }
     tb.appendChild(row);
@@ -638,7 +640,7 @@ function openRuleEditor(kind,title,r){
   const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Cancel</button></div>');
   const sv=el(`<button class="btn primary">${editing?'Save':'Submit'}</button>`);
   sv.onclick=async()=>{
-    try{await api('/policy/rules'+(editing?'/'+r.id:''),{method:editing?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,data:m})});closeModal();toast('Saved');go(STATE.role==='partner'?'p-policy':'policy');}
+    try{await api('/policy/rules'+(editing?'/'+r.id:''),{method:editing?'PUT':'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,enabled:m.active!==false,data:m})});closeModal();toast('Saved');go(STATE.role==='partner'?'p-policy':'policy');}
     catch(e){toast('Failed: '+e.message);}
   };
   foot.appendChild(sv);b.appendChild(foot);

@@ -61,11 +61,12 @@ export async function analyze(message: Message): Promise<Analysis> {
   const scores = aggregate(signals);
   const { verdict, confidence } = decideVerdict(scores);
 
-  // Disposition comes from the active policy (customer template → partner default
-  // → built-in), with allow/block lists and auth-fail overrides applied.
-  const act = dispositionFor(message.tenantId, verdict, message);
+  // If an admin manually released this message, it stays delivered — policy
+  // (incl. block rules) is NOT re-applied, so it can't bounce back to quarantine.
+  const released = emailStore.isReleased(message.internetMessageId);
+  const act = released ? 'deliver' : dispositionFor(message.tenantId, verdict, message);
   const isThreat = ['phishing', 'malware', 'impersonation', 'policy_geo'].includes(verdict);
-  const remediated = isThreat && act === 'quarantine'; // post-delivery clawback
+  const remediated = !released && isThreat && act === 'quarantine'; // post-delivery clawback
   const disposition = remediated ? 'remediated' : act;
 
   const analysis: Analysis = {

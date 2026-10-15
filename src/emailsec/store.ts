@@ -17,6 +17,14 @@ class EmailStore {
   messages = new Map<string, Message>();
   analyses = new Map<string, Analysis>(); // keyed by messageId
   releaseRequests: ReleaseRequest[] = [];
+  // Messages manually released by an admin — identified by their STABLE
+  // internetMessageId, so a webhook firing after the release-to-inbox won't
+  // re-apply policy and bounce it back into quarantine.
+  released = new Set<string>();
+
+  markReleased(internetMessageId?: string) { if (internetMessageId) this.released.add(internetMessageId); }
+  clearReleased(internetMessageId?: string) { if (internetMessageId) this.released.delete(internetMessageId); }
+  isReleased(internetMessageId?: string) { return Boolean(internetMessageId && this.released.has(internetMessageId)); }
 
   saveMessage(m: Message) { this.messages.set(m.id, m); return m; }
   saveAnalysis(a: Analysis) { this.analyses.set(a.messageId, a); return a; }

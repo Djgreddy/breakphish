@@ -113,3 +113,11 @@ export async function upsertAnalysisRow(a: any): Promise<void> {
 export async function loadAnalyses(): Promise<any[]> {
   return q('select * from analyses');
 }
+
+// ---- manual-release overrides ----
+export async function markReleasedRow(internetMessageId: string, tenantId: string): Promise<void> {
+  await q(`insert into released_overrides (internet_message_id, tenant_id) values ($1,$2) on conflict (internet_message_id) do nothing`, [internetMessageId, tenantId]);
+}
+export async function loadReleased(): Promise<string[]> {
+  return (await q<{ internet_message_id: string }>('select internet_message_id from released_overrides')).map(r => r.internet_message_id);
+}

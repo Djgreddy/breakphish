@@ -362,6 +362,9 @@ export function buildApi() {
       if (!m || !a) return res.status(404).json({ error: 'not found' });
       a.disposition = 'deliver'; a.remediated = false;
       emailStore.saveAnalysis(a); await persistScored(m, a);
+      // Pin as released so a webhook firing after the move-to-inbox won't re-quarantine it.
+      emailStore.markReleased(m.internetMessageId);
+      if (m.internetMessageId) { try { await (await import('./db/persist')).markReleasedRow(m.internetMessageId, id); } catch {} }
       const { conn, user } = mailboxFor(id, m);
       if (conn?.entraTenantId && user) { try { await (await import('./emailsec/mailActions')).makeMailActions().moveToInbox(conn.entraTenantId, user.externalId, { graphId: mid, internetMessageId: m.internetMessageId }); } catch (e) { console.error('[release] move failed', (e as Error).message); } }
       const option = String(req.body?.option ?? 'plain');
