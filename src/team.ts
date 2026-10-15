@@ -12,6 +12,7 @@ export type TeamRole = 'partner_admin' | 'analyst' | 'read_only';
 export interface TeamMember {
   id: string; email: string; name: string; role: TeamRole;
   authType: 'local' | 'sso'; mfaEnabled: boolean; status: 'active' | 'invited'; createdAt: string;
+  passwordHash?: string; totpSecret?: string; totpEnabled?: boolean;
 }
 
 const members = new Map<string, TeamMember>();
@@ -37,17 +38,31 @@ export async function saveTeamMember(input: Partial<TeamMember> & { email: strin
     status: input.status ?? existing?.status ?? ((input.authType ?? 'sso') === 'local' ? 'invited' : 'active'),
     createdAt: existing?.createdAt ?? new Date().toISOString(),
   };
+  // carry forward credentials unless explicitly set
+  m.passwordHash = input.passwordHash ?? existing?.passwordHash;
+  m.totpSecret = input.totpSecret ?? existing?.totpSecret;
+  m.totpEnabled = input.totpEnabled ?? existing?.totpEnabled ?? false;
   members.set(m.id, m);
-  if (dbEnabled()) {
-    await q(
-      `insert into team_members (id,email,name,role,auth_type,mfa_enabled,status,created_at)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
-       on conflict (id) do update set email=excluded.email, name=excluded.name, role=excluded.role,
-         auth_type=excluded.auth_type, mfa_enabled=excluded.mfa_enabled, status=excluded.status`,
-      [m.id, m.email, m.name, m.role, m.authType, m.mfaEnabled, m.status, m.createdAt],
-    );
-  }
+  await persistTeam(m);
   return m;
+}
+
+async function persistTeam(m: TeamMember) {
+  if (!dbEnabled()) return;
+  await q(
+    `insert into team_members (id,email,name,role,auth_type,mfa_enabled,status,created_at,password_hash,totp_secret,totp_enabled)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     on conflict (id) do update set email=excluded.email, name=excluded.name, role=excluded.role,
+       auth_type=excluded.auth_type, mfa_enabled=excluded.mfa_enabled, status=excluded.status,
+       password_hash=excluded.password_hash, totp_secret=excluded.totp_secret, totp_enabled=excluded.totp_enabled`,
+    [m.id, m.email, m.name, m.role, m.authType, m.mfaEnabled, m.status, m.createdAt, m.passwordHash ?? null, m.totpSecret ?? null, m.totpEnabled ?? false],
+  );
+}
+
+// Update stored credentials (used by the local login/enrollment flow).
+export async function updateTeamCreds(id: string, fields: Partial<Pick<TeamMember, 'passwordHash' | 'totpSecret' | 'totpEnabled' | 'status'>>): Promise<void> {
+  const m = members.get(id); if (!m) return;
+  Object.assign(m, fields); await persistTeam(m);
 }
 
 export async function deleteTeamMember(id: string): Promise<void> {
@@ -62,6 +77,7 @@ export async function hydrateTeam(): Promise<number> {
     id: r.id, email: r.email, name: r.name, role: r.role,
     authType: r.auth_type ?? 'sso', mfaEnabled: r.mfa_enabled ?? false, status: r.status ?? 'active',
     createdAt: (r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at),
+    passwordHash: r.password_hash ?? undefined, totpSecret: r.totp_secret ?? undefined, totpEnabled: r.totp_enabled ?? false,
   });
   return rows.length;
 }

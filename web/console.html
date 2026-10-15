@@ -181,6 +181,38 @@ async function renderLogin(){
     });
     if(!data.personas.length)list.appendChild(el('<div style="color:var(--faint);font-size:13px">No connected tenants yet.</div>'));
   }
+  // --- local sign-in (team members) ---
+  list.appendChild(el('<div style="display:flex;align-items:center;gap:10px;margin:16px 0 14px;color:var(--faint);font-size:12px"><div style="flex:1;height:1px;background:var(--line)"></div>OR SIGN IN LOCALLY<div style="flex:1;height:1px;background:var(--line)"></div></div>'));
+  const lf=el('<div></div>');
+  const emailI=el('<input placeholder="Email" autocomplete="username" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:8px">');
+  const passI=el('<input type="password" placeholder="Password" autocomplete="current-password" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:8px">');
+  const mfaBox=el('<div style="display:none;margin-bottom:8px"></div>');
+  const codeI=el('<input placeholder="6-digit code" inputmode="numeric" maxlength="6" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px">');
+  const enrollNote=el('<div style="font-size:12px;color:var(--muted);margin-bottom:8px;display:none"></div>');
+  mfaBox.appendChild(enrollNote);mfaBox.appendChild(codeI);
+  const err=el('<div style="color:var(--danger);font-size:12.5px;margin-bottom:8px;display:none"></div>');
+  const btn=el('<button class="btn primary" style="width:100%;justify-content:center">Sign in</button>');
+  lf.appendChild(emailI);lf.appendChild(passI);lf.appendChild(mfaBox);lf.appendChild(err);lf.appendChild(btn);list.appendChild(lf);
+  const showErr=(m)=>{err.textContent=m;err.style.display='block';};
+  btn.onclick=async()=>{
+    err.style.display='none';btn.disabled=true;btn.textContent='Signing in…';
+    try{
+      const body={email:emailI.value.trim(),password:passI.value};
+      if(mfaBox.style.display!=='none'&&codeI.value)body.code=codeI.value.trim();
+      const r=await fetch('/auth/login/local',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+      const d=await r.json();
+      if(!r.ok){showErr(d.error||'Sign-in failed');btn.disabled=false;btn.textContent='Sign in';return;}
+      if(d.needsMfa){
+        mfaBox.style.display='block';
+        if(d.enroll){enrollNote.style.display='block';enrollNote.innerHTML=`Set up your authenticator app. Add this key manually:<br><span class="mono" style="font-size:12px;word-break:break-all;color:var(--txt)">${d.secret}</span><br>then enter the 6-digit code.`;}
+        else enrollNote.style.display='none';
+        btn.textContent='Verify';btn.disabled=false;codeI.focus();return;
+      }
+      if(d.session){applySession(d.session);return;}
+      showErr('Unexpected response');btn.disabled=false;btn.textContent='Sign in';
+    }catch(e){showErr('Network error');btn.disabled=false;btn.textContent='Sign in';}
+  };
+  passI.onkeydown=e=>{if(e.key==='Enter')btn.onclick();};codeI.onkeydown=e=>{if(e.key==='Enter')btn.onclick();};
   host.innerHTML='';host.appendChild(wrap);
 }
 async function authGet(path){const r=await fetch(path);if(!r.ok)throw new Error(r.status);return r.json();}
@@ -246,7 +278,6 @@ function placeholderView(title,desc){
 }
 const PLACEHOLDERS={
   'p-tracker':['Live Email Tracker','Aggregate inbound & outbound mail across all your customers.'],
-  'p-analytics':['Analytics','Executive summaries, verdict trends, and exportable reports.'],
   'p-invoices':['Invoices','Billing and usage invoices across your customers.'],
   'p-audit':['Audit Logs','Every action taken in the console, with actor, resource, and result.'],
 };
@@ -476,6 +507,59 @@ VIEWS.users=async function(){
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
+/* ---- Analytics ---- */
+VIEWS['p-analytics']=analyticsView; VIEWS['analytics']=analyticsView;
+async function analyticsView(){
+  const a=await api('/analytics');
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph"><h1>Analytics</h1><p>${STATE.role==='partner'?'Across all customers':STATE._cust.name} · ${a.processed} messages analyzed</p></div>`));
+  // summary cards
+  const cards=el('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px"></div>');
+  const card=(label,val,sub,color)=>el(`<div class="card p"><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">${label}</div><div style="font-size:28px;font-weight:700;margin:4px 0;${color?`color:${color}`:''}">${val}</div><div style="font-size:12px;color:var(--muted)">${sub||''}</div></div>`);
+  cards.appendChild(card('Processed',a.processed,'messages analyzed'));
+  cards.appendChild(card('Threats',a.threats,'phishing · malware · impersonation',a.threats?'var(--danger)':''));
+  cards.appendChild(card('Quarantined',a.quarantined,`${a.catchRate}% of mail acted on`,'var(--warn)'));
+  cards.appendChild(card('Clean rate',a.cleanRate+'%',`${a.clean} clean messages`,'var(--ok)'));
+  v.appendChild(cards);
+  const grid=el('<div class="grid2"></div>');
+  // verdict breakdown (bars)
+  const vc=el('<div class="card"><div class="card-h"><h3>Verdict breakdown</h3></div></div>');
+  const vb=el('<div style="padding:10px 18px 16px"></div>');
+  const total=Math.max(1,a.processed);
+  Object.entries(a.verdicts).sort(([,x],[,y])=>y-x).forEach(([k,n])=>{
+    const pct=Math.round(n/total*100);
+    vb.appendChild(el(`<div style="margin:9px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px"><span><span class="pill ${VERDICT_CLS[k]||'p-muted'}" style="font-size:11px">${VERDICT_LABEL[k]||k}</span></span><span class="mono" style="color:var(--muted)">${n} · ${pct}%</span></div><div style="height:7px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--brand)"></div></div></div>`));
+  });
+  if(!Object.keys(a.verdicts).length)vb.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No data yet.</div>'));
+  vc.appendChild(vb);grid.appendChild(vc);
+  // timeline (last 14 days)
+  const tc=el('<div class="card"><div class="card-h"><h3>Volume &amp; threats (14 days)</h3></div></div>');
+  const tbd=el('<div style="padding:16px 18px"></div>');
+  const maxDay=Math.max(1,...a.timeline.map(d=>d.total));
+  const bars=el('<div style="display:flex;align-items:flex-end;gap:5px;height:120px"></div>');
+  a.timeline.forEach(d=>{const h=Math.round(d.total/maxDay*110);const th=d.total?Math.round(d.threats/d.total*h):0;bars.appendChild(el(`<div title="${d.day}: ${d.total} msgs, ${d.threats} threats" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:110px"><div style="height:${h}px;background:var(--brand);border-radius:3px 3px 0 0;position:relative;overflow:hidden"><div style="position:absolute;bottom:0;left:0;right:0;height:${th}px;background:var(--danger)"></div></div></div>`));});
+  if(!a.timeline.length)tbd.appendChild(el('<div style="color:var(--faint);font-size:13px">No data yet.</div>'));else{tbd.appendChild(bars);tbd.appendChild(el('<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--faint)"><span>'+a.timeline[0].day.slice(5)+'</span><span style="color:var(--danger)">■ threats</span><span>'+a.timeline[a.timeline.length-1].day.slice(5)+'</span></div>'));}
+  tc.appendChild(tbd);grid.appendChild(tc);
+  v.appendChild(grid);
+  // top threat senders + per-customer
+  const grid2=el('<div class="grid2" style="margin-top:16px"></div>');
+  const sc=el('<div class="card"><div class="card-h"><h3>Top threat senders</h3></div></div>');
+  const sbd=el('<div style="padding:6px 18px 14px"></div>');
+  a.topSenders.forEach(s=>sbd.appendChild(el(`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.sender}</span><span class="pill p-danger">${s.count}</span></div>`)));
+  if(!a.topSenders.length)sbd.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No threats detected.</div>'));
+  sc.appendChild(sbd);grid2.appendChild(sc);
+  if(STATE.role==='partner'&&a.perCustomer.length){
+    const pc=el('<div class="card"><div class="card-h"><h3>By customer</h3></div></div>');
+    const pbd=el('<div class="pad0"></div>');
+    const ptbl=el('<table><thead><tr><th>Customer</th><th>Processed</th><th>Threats</th><th>Quarantined</th></tr></thead><tbody></tbody></table>');
+    const ptb=ptbl.querySelector('tbody');
+    a.perCustomer.forEach(c=>ptb.appendChild(el(`<tr><td style="font-weight:600">${c.name}</td><td class="mono">${c.processed}</td><td class="mono" style="color:${c.threats?'var(--danger)':'var(--muted)'}">${c.threats}</td><td class="mono">${c.quarantined}</td></tr>`)));
+    pbd.appendChild(ptbl);pc.appendChild(pbd);grid2.appendChild(pc);
+  }
+  v.appendChild(grid2);
+  return v;
+}
+
 /* ---- Team Members (partner) ---- */
 const TEAM_ROLES=[['partner_admin','Administrator'],['analyst','Analyst'],['read_only','Read-only']];
 const roleLabel=(r)=>({partner_admin:'Administrator',analyst:'Analyst',read_only:'Read-only'})[r]||r;
@@ -510,12 +594,17 @@ function openTeamEditor(t){
   const segBar=el('<div style="display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:3px"></div>');
   const mfaRow=el('<div style="display:flex;align-items:center;gap:14px;padding:10px 0"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">Require MFA</div><div style="font-size:11.5px;color:var(--faint)">For local sign-in (SSO uses Microsoft MFA).</div></div></div>');
   const mfaTog=makeToggle(m.mfaEnabled);mfaTog.onclick=(()=>{const o=mfaTog.onclick;return()=>{o&&o();m.mfaEnabled=mfaTog._get();};})();mfaRow.appendChild(mfaTog);
-  [['sso','SSO (Microsoft Entra)'],['local','Local user']].forEach(([val,lbl])=>{const bt=el(`<button style="padding:7px 13px;border:none;border-radius:7px;font-size:12.5px;font-weight:600;background:${m.authType===val?'var(--brand)':'none'};color:${m.authType===val?'#fff':'var(--muted)'}">${lbl}</button>`);bt.onclick=()=>{m.authType=val;segBar.querySelectorAll('button').forEach(x=>{x.style.background='none';x.style.color='var(--muted)';});bt.style.background='var(--brand)';bt.style.color='#fff';mfaRow.style.display=val==='local'?'flex':'none';};segBar.appendChild(bt);});
+  [['sso','SSO (Microsoft Entra)'],['local','Local user']].forEach(([val,lbl])=>{const bt=el(`<button style="padding:7px 13px;border:none;border-radius:7px;font-size:12.5px;font-weight:600;background:${m.authType===val?'var(--brand)':'none'};color:${m.authType===val?'#fff':'var(--muted)'}">${lbl}</button>`);bt.onclick=()=>{m.authType=val;segBar.querySelectorAll('button').forEach(x=>{x.style.background='none';x.style.color='var(--muted)';});bt.style.background='var(--brand)';bt.style.color='#fff';mfaRow.style.display=val==='local'?'flex':'none';pwRow.style.display=val==='local'?'block':'none';};segBar.appendChild(bt);});
   seg.appendChild(segBar);
   b.appendChild(sField('Full name',sInput(m.name,v=>m.name=v,'Jane Smith')));
   b.appendChild(sField('Email',sInput(m.email,v=>m.email=v,'jane@yourmsp.com')));
   b.appendChild(sField('Role',sSelect(roleLabel(m.role),TEAM_ROLES.map(r=>r[1]),lbl=>{const f=TEAM_ROLES.find(r=>r[1]===lbl);m.role=f?f[0]:'analyst';})));
   b.appendChild(seg);
+  // password (local users only)
+  const pwRow=el('<div class="field"><label>'+(t?'New password (leave blank to keep)':'Initial password')+'</label></div>');
+  const pwI=el('<input type="password" autocomplete="new-password" placeholder="at least 8 characters" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px">');
+  pwI.oninput=()=>m.password=pwI.value;pwRow.appendChild(pwI);
+  b.appendChild(pwRow);pwRow.style.display=m.authType==='local'?'block':'none';
   b.appendChild(mfaRow);mfaRow.style.display=m.authType==='local'?'flex':'none';
   const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Cancel</button></div>');
   const sv=el(`<button class="btn primary">${t?'Save':'Add member'}</button>`);

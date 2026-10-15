@@ -242,3 +242,8 @@ alter table messages add column if not exists sender_country text;
 alter table team_members add column if not exists auth_type text not null default 'sso';   -- 'local' | 'sso'
 alter table team_members add column if not exists mfa_enabled boolean not null default false;
 alter table team_members add column if not exists status text not null default 'active';   -- active | invited
+
+-- local-auth fields for team members
+alter table team_members add column if not exists password_hash text;
+alter table team_members add column if not exists totp_secret   text;
+alter table team_members add column if not exists totp_enabled  boolean not null default false;

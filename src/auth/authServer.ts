@@ -11,6 +11,8 @@ import { resolveRole } from './roles';
 import { newSession, setSessionCookie, clearSessionCookie } from './session';
 import { attachSession, sessionOf, requireAuth, requirePartner } from './middleware';
 import type { Identity, Session } from './identity';
+import { getTeamByEmail, updateTeamCreds } from '../team';
+import { verifyPassword, generateTotpSecret, otpauthUri, verifyTotp } from './localAuth';
 
 const provider = makeAuthProvider();
 const states = new Map<string, number>(); // entra CSRF states
@@ -40,6 +42,36 @@ export function buildAuthApp() {
     if (!session) return res.status(403).json({ error: 'identity is not provisioned for any tenant' });
     setSessionCookie(res, session);
     res.json({ session: publicSession(session) });
+  });
+
+  // --- local: email + password (+ TOTP MFA) for local team members ---
+  app.post('/auth/login/local', async (req, res) => {
+    const email = String(req.body?.email ?? '').toLowerCase().trim();
+    const password = String(req.body?.password ?? '');
+    const code = req.body?.code ? String(req.body.code) : '';
+    const m = getTeamByEmail(email);
+    if (!m || m.authType !== 'local' || !m.passwordHash) return res.status(401).json({ error: 'invalid email or password' });
+    if (!verifyPassword(password, m.passwordHash)) return res.status(401).json({ error: 'invalid email or password' });
+
+    const finish = () => {
+      const role = m.role === 'read_only' || m.role === 'analyst' ? 'partner_admin' : 'partner_admin';
+      const session = newSession({ sub: 'local:' + m.id, email: m.email, name: m.name, role });
+      setSessionCookie(res, session);
+      return res.json({ session: publicSession(session) });
+    };
+
+    if (!m.mfaEnabled) return finish();
+
+    // ensure a secret exists (pending until confirmed)
+    let secret = m.totpSecret;
+    if (!secret) { secret = generateTotpSecret(); await updateTeamCreds(m.id, { totpSecret: secret }); }
+
+    if (!code) {
+      return res.json({ needsMfa: true, enroll: !m.totpEnabled, otpauthUri: !m.totpEnabled ? otpauthUri(secret, m.email) : undefined, secret: !m.totpEnabled ? secret : undefined });
+    }
+    if (!verifyTotp(secret, code)) return res.status(401).json({ error: 'invalid verification code' });
+    if (!m.totpEnabled) await updateTeamCreds(m.id, { totpEnabled: true, status: 'active' });
+    return finish();
   });
 
   // --- entra: redirect to Microsoft, then handle the callback ---
