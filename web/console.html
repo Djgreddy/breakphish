@@ -85,6 +85,10 @@ tbody tr.ck{cursor:pointer}tbody tr.ck:hover{background:var(--surface2)}
 .setnav{display:block;width:100%;text-align:left;padding:10px 12px;border-radius:9px;font-size:13.5px;font-weight:500;color:var(--muted);margin-bottom:2px;transition:.12s}
 .setnav:hover{color:var(--txt);background:var(--surface2)}
 .setnav.on{color:#fff;background:var(--brand)}
+.pilltabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.pilltabs button{border:1px solid var(--line);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:500;color:var(--muted);background:var(--surface);transition:.12s}
+.pilltabs button:hover{color:var(--txt);border-color:var(--muted)}
+.pilltabs button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
 .spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:sp .7s linear infinite;margin:0 auto 12px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:11px;font-size:13px;font-weight:500;opacity:0;transition:.22s;z-index:200}.toast.show{opacity:1;transform:translateX(-50%)}
@@ -496,7 +500,7 @@ async function policyView(){
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Policy</h1><p>${isPartner?'Global policies applied to your customers':STATE._cust.name+' · global + your own policies'}</p></div>`));
   if(!POLTAB||!POL_TABS.includes(POLTAB))POLTAB=POL_TABS[0];
-  const tabBar=el('<div class="tabs" style="flex-wrap:wrap;margin-bottom:16px"></div>');
+  const tabBar=el('<div class="pilltabs"></div>');
   const body=el('<div></div>');
   const paint=async()=>{body.innerHTML='<div class="loading"><div class="spin"></div></div>';try{let node;if(POLTAB==='Policy Templates')node=await polTemplates();else if(POLTAB==='Auto Remediation')node=await autoRemediationView();else node=await polRules(POL_KIND[POLTAB],POLTAB);body.innerHTML='';body.appendChild(node);}catch(e){body.innerHTML=`<div class="card p" style="color:var(--danger)">${e.message}</div>`;}};
   POL_TABS.forEach(t=>{const b=el(`<button class="${POLTAB===t?'on':''}">${t}</button>`);b.onclick=async()=>{POLTAB=t;tabBar.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');await paint();};tabBar.appendChild(b);});
@@ -597,6 +601,20 @@ async function polRules(kind,title){
   });
   card.appendChild(tbl);v.appendChild(card);return v;
 }
+// Mesh-style multi-select dropdown. Mutates `selected` (array of ids) in place.
+function multiSelect(placeholder,options,selected){
+  const wrap=el('<div style="position:relative"></div>');
+  const btn=el('<button type="button" style="width:100%;text-align:left;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;background:var(--surface2);color:var(--txt);display:flex;align-items:center;gap:8px"></button>');
+  const label=el('<span style="flex:1"></span>');btn.appendChild(label);btn.appendChild(el('<span style="color:var(--faint)">▾</span>'));
+  const panel=el('<div style="position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:6px;max-height:230px;overflow:auto;box-shadow:0 18px 44px -14px rgba(0,0,0,.55);display:none"></div>');
+  const refresh=()=>{label.textContent=selected.length?selected.length+' selected':placeholder;label.style.color=selected.length?'var(--txt)':'var(--faint)';};
+  if(!options.length)panel.appendChild(el('<div style="color:var(--faint);font-size:12px;padding:8px 10px">No customers.</div>'));
+  options.forEach(o=>{const row=el('<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:13px"></label>');const cb=el('<input type="checkbox">');cb.checked=selected.includes(o.id);cb.onchange=()=>{if(cb.checked){if(!selected.includes(o.id))selected.push(o.id);}else{const i=selected.indexOf(o.id);if(i>=0)selected.splice(i,1);}refresh();};row.onmouseover=()=>row.style.background='var(--surface2)';row.onmouseout=()=>row.style.background='none';row.appendChild(cb);row.appendChild(el('<span>'+o.name+'</span>'));panel.appendChild(row);});
+  btn.onclick=(e)=>{e.stopPropagation();panel.style.display=panel.style.display==='none'?'block':'none';};
+  panel.onclick=e=>e.stopPropagation();
+  document.addEventListener('click',()=>{panel.style.display='none';});
+  refresh();wrap.appendChild(btn);wrap.appendChild(panel);return wrap;
+}
 // Summarize what a rule matches on, for the list.
 function ruleMatch(r){const d=r.data||{};const p=[];if(d.sender)p.push(d.sender);if(d.senders&&d.senders.length)p.push(...d.senders);if(d.ip&&d.ip.length)p.push(...d.ip.map(x=>'IP:'+x));if(d.subjects&&d.subjects.length)p.push(...d.subjects.map(x=>'Subj:'+x));if(d.urls&&d.urls.length)p.push(...d.urls.map(x=>'URL:'+x));if(d.name)p.push(d.name);return p.join(', ')||'—';}
 // multi-line text field returning array (with optional initial array)
@@ -623,11 +641,11 @@ function openRuleEditor(kind,title,r){
     // common scope controls (partner only): target all customers or a subset.
     if(STATE.role==='partner'){
       const custWrap=el('<div class="field" style="'+(m.applyToAll?'display:none':'')+'"><label>Customers</label></div>');
-      const holder=el('<div style="max-height:170px;overflow:auto;border:1px solid var(--line);border-radius:9px;padding:8px"><div style="color:var(--faint);font-size:12px">Loading…</div></div>');
-      custWrap.appendChild(holder);custWrap.appendChild(el('<div style="font-size:11px;color:var(--faint);margin-top:4px">Only the selected customers receive this rule.</div>'));
+      const ddHolder=el('<div></div>');ddHolder.appendChild(el('<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--faint);background:var(--surface2)">Loading…</div>'));
+      custWrap.appendChild(ddHolder);custWrap.appendChild(el('<div style="font-size:11px;color:var(--faint);margin-top:4px">Only the selected customers receive this rule.</div>'));
       b.appendChild(toggleField('Select All Customers','On: applies to every customer. Off: choose specific customers below.',m.applyToAll,v=>{m.applyToAll=v;custWrap.style.display=v?'none':'block';}));
       b.appendChild(custWrap);
-      api('/customers').then(list=>{holder.innerHTML='';if(!list.length){holder.appendChild(el('<div style="color:var(--faint);font-size:12px">No customers.</div>'));return;}list.forEach(c=>holder.appendChild(sCheck(c.name,m.customerIds.includes(c.id),ck=>{if(ck){if(!m.customerIds.includes(c.id))m.customerIds.push(c.id);}else{const i=m.customerIds.indexOf(c.id);if(i>=0)m.customerIds.splice(i,1);}})));}).catch(()=>{holder.innerHTML='<div style="color:var(--danger);font-size:12px">Could not load customers</div>';});
+      api('/customers').then(list=>{ddHolder.innerHTML='';ddHolder.appendChild(multiSelect('Select customers…',list.map(c=>({id:c.id,name:c.name})),m.customerIds));}).catch(()=>{ddHolder.innerHTML='<div style="color:var(--danger);font-size:12px">Could not load customers</div>';});
     }
     if(kind==='allow'||kind==='block'){
       b.appendChild(toggleField('Active','',m.active,v=>m.active=v));
@@ -835,8 +853,9 @@ async function settingsDomains(){
   if(!Array.isArray(SET.managedDomains))SET.managedDomains=[];
   const c=el('<div class="card p"></div>');
   c.appendChild(el('<div style="font-size:13px;color:var(--muted);margin-bottom:14px">Domains managed for this customer. Verified domains come from Microsoft 365. Add custom domains you also want treated as internal.</div>'));
-  // verified (read-only) from the customer connection
-  let verified=[];try{const cust=await api('/customers/'+STATE.customerId);verified=cust.connection?.verifiedDomains||[];}catch(e){}
+  // verified (read-only): the domain the customer was set up with, plus any
+  // verified domains from the Microsoft 365 connection.
+  let verified=[];try{const cust=await api('/customers/'+STATE.customerId);verified=[...new Set([cust.domain,...(cust.connection?.verifiedDomains||[])].filter(Boolean))];}catch(e){}
   const tbl=el('<table><thead><tr><th>Domain</th><th>Type</th><th>Status</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
   const tb=tbl.querySelector('tbody');
   function draw(){
