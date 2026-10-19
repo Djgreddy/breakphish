@@ -262,3 +262,15 @@ create table if not exists ai_config (
   azure_api_version text,
   updated_at        timestamptz not null default now()
 );
+
+-- AI usage counters (aggregated per month)
+create table if not exists ai_usage (
+  month        text primary key,          -- YYYY-MM
+  calls        bigint not null default 0,
+  input_tokens bigint not null default 0,
+  output_tokens bigint not null default 0,
+  scored       bigint not null default 0
+);
+-- editable price (per 1M tokens) for cost estimation
+alter table ai_config add column if not exists input_price  numeric not null default 0;
+alter table ai_config add column if not exists output_price numeric not null default 0;

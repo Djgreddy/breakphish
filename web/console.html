@@ -1191,7 +1191,37 @@ async function settingsAI(){
     test.textContent='⚡ Test connection';test.disabled=false;};
   if(!cfg.locked)bar.appendChild(save);bar.appendChild(test);bar.appendChild(testOut);
   c.appendChild(bar);
-  return c;
+
+  // ---- Usage & cost ----
+  const wrap=el('<div></div>');wrap.appendChild(c);
+  const uc=el('<div class="card p" style="max-width:680px;margin-top:16px"></div>');
+  uc.appendChild(el('<h3 style="font-size:15px;margin-bottom:4px">Usage & estimated cost</h3>'));
+  uc.appendChild(el('<div style="font-size:12px;color:var(--faint);margin-bottom:14px">Enter your provider\'s current token prices (per 1M tokens — check their pricing page) to estimate spend. Only the ambiguous middle of inbound external mail reaches the model.</div>'));
+  const pm={inputPrice:cfg.inputPrice||0,outputPrice:cfg.outputPrice||0};
+  const body2=el('<div id="usagebody" style="color:var(--faint);font-size:13px">Loading usage…</div>');
+  const priceRow=el('<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px"></div>');
+  priceRow.appendChild(sField('Input $ / 1M tokens',sInput(String(pm.inputPrice),v=>pm.inputPrice=Number(v)||0,'e.g. 0.15')));
+  priceRow.appendChild(sField('Output $ / 1M tokens',sInput(String(pm.outputPrice),v=>pm.outputPrice=Number(v)||0,'e.g. 0.60')));
+  uc.appendChild(priceRow);
+  const savePrice=el('<button class="btn sm" style="margin-bottom:14px">Save prices & refresh</button>');
+  savePrice.onclick=async()=>{try{await api('/ai/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({provider:m.provider,endpoint:m.endpoint,model:m.model,azureDeployment:m.azureDeployment,azureApiVersion:m.azureApiVersion,inputPrice:pm.inputPrice,outputPrice:pm.outputPrice})});toast('Prices saved');loadUsage();}catch(e){toast('Failed: '+e.message);}};
+  if(!cfg.locked)uc.appendChild(savePrice);
+  uc.appendChild(body2);wrap.appendChild(uc);
+  async function loadUsage(){
+    try{const u=await api('/ai/usage');const cur=u.current;
+      const inCost=cur.inputTokens/1e6*pm.inputPrice;const outCost=cur.outputTokens/1e6*pm.outputPrice;const cost=inCost+outCost;
+      const stat=(l,v)=>`<div><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em">${l}</div><div style="font-size:22px;font-weight:700">${v}</div></div>`;
+      body2.innerHTML=`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:12px">
+        ${stat('AI calls (mo)',cur.calls.toLocaleString())}
+        ${stat('Ambiguous rate',u.ambiguousRate+'%')}
+        ${stat('Tokens in/out',(cur.inputTokens/1000).toFixed(1)+'k / '+(cur.outputTokens/1000).toFixed(1)+'k')}
+        ${stat('Est. cost (mo)','$'+cost.toFixed(2))}
+      </div>
+      <div style="font-size:12px;color:var(--muted)">${cur.scored.toLocaleString()} inbound external messages scored this month; ${cur.calls.toLocaleString()} reached the AI (${u.ambiguousRate}%). Lifetime: ${u.lifetime.calls.toLocaleString()} calls.</div>`;
+    }catch(e){body2.textContent='Usage unavailable: '+e.message;}
+  }
+  loadUsage();
+  return wrap;
 }
 
 async function settingsGeneral(){

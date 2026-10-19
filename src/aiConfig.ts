@@ -33,8 +33,8 @@ function dec(s: string): string {
 const envConfigured = () => (process.env.LLM_PROVIDER ?? 'none') !== 'none';
 
 // In-memory copy of the DB config (hydrated on boot).
-let db: LlmConfig & { hasKey: boolean } = {
-  provider: 'none', apiKey: '', endpoint: '', model: 'gpt-4o-mini', azureDeployment: '', azureApiVersion: '2024-06-01', hasKey: false,
+let db: LlmConfig & { hasKey: boolean; inputPrice: number; outputPrice: number } = {
+  provider: 'none', apiKey: '', endpoint: '', model: 'gpt-4o-mini', azureDeployment: '', azureApiVersion: '2024-06-01', hasKey: false, inputPrice: 0, outputPrice: 0,
 };
 
 // The EFFECTIVE config the classifier uses.
@@ -53,28 +53,31 @@ export function publicAiConfig() {
     provider: shown.provider, endpoint: shown.endpoint || '', model: shown.model || '',
     azureDeployment: shown.azureDeployment || '', azureApiVersion: shown.azureApiVersion || '2024-06-01',
     hasKey: locked ? !!config.llm.apiKey : db.hasKey,
+    inputPrice: db.inputPrice, outputPrice: db.outputPrice,
     locked, source: eff.source, active: eff.provider !== 'none' && (locked ? !!config.llm.apiKey : db.hasKey),
   };
 }
 
 // Save from the WebUI. An empty apiKey keeps the existing one (write-only field).
-export async function saveAiConfig(input: { provider: Provider; apiKey?: string; endpoint?: string; model?: string; azureDeployment?: string; azureApiVersion?: string }): Promise<void> {
+export async function saveAiConfig(input: { provider: Provider; apiKey?: string; endpoint?: string; model?: string; azureDeployment?: string; azureApiVersion?: string; inputPrice?: number; outputPrice?: number }): Promise<void> {
   if (envConfigured()) throw new Error('AI provider is managed via environment variables and cannot be changed here.');
   db.provider = input.provider;
   db.endpoint = input.endpoint ?? '';
   db.model = input.model ?? 'gpt-4o-mini';
   db.azureDeployment = input.azureDeployment ?? '';
   db.azureApiVersion = input.azureApiVersion ?? '2024-06-01';
+  db.inputPrice = Number(input.inputPrice) || 0;
+  db.outputPrice = Number(input.outputPrice) || 0;
   if (input.apiKey) { db.apiKey = input.apiKey; db.hasKey = true; }
   if (input.provider === 'none') { db.apiKey = ''; db.hasKey = false; }
   if (dbEnabled()) {
     await q(
-      `insert into ai_config (id, provider, api_key_enc, endpoint, model, azure_deployment, azure_api_version, updated_at)
-       values ('partner', $1, $2, $3, $4, $5, $6, now())
+      `insert into ai_config (id, provider, api_key_enc, endpoint, model, azure_deployment, azure_api_version, input_price, output_price, updated_at)
+       values ('partner', $1, $2, $3, $4, $5, $6, $7, $8, now())
        on conflict (id) do update set provider=excluded.provider, api_key_enc=excluded.api_key_enc,
          endpoint=excluded.endpoint, model=excluded.model, azure_deployment=excluded.azure_deployment,
-         azure_api_version=excluded.azure_api_version, updated_at=now()`,
-      [db.provider, db.hasKey ? enc(db.apiKey) : null, db.endpoint, db.model, db.azureDeployment, db.azureApiVersion],
+         azure_api_version=excluded.azure_api_version, input_price=excluded.input_price, output_price=excluded.output_price, updated_at=now()`,
+      [db.provider, db.hasKey ? enc(db.apiKey) : null, db.endpoint, db.model, db.azureDeployment, db.azureApiVersion, db.inputPrice, db.outputPrice],
     );
   }
 }
@@ -87,5 +90,6 @@ export async function hydrateAiConfig(): Promise<void> {
   db = {
     provider: r.provider ?? 'none', apiKey, endpoint: r.endpoint ?? '', model: r.model ?? 'gpt-4o-mini',
     azureDeployment: r.azure_deployment ?? '', azureApiVersion: r.azure_api_version ?? '2024-06-01', hasKey: !!apiKey,
+    inputPrice: Number(r.input_price) || 0, outputPrice: Number(r.output_price) || 0,
   };
 }

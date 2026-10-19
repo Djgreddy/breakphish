@@ -7,6 +7,7 @@ import type { Message, Analysis, Signal, Verdict } from './types';
 import { runStaticScorers } from './scorers';
 import { runDetectors } from './detectors';
 import { classifyIntent, llmEnabled } from './llm';
+import { recordScored } from '../aiUsage';
 import { makeClassifier } from './classifier';
 import { dispositionFor } from '../policy';
 import { emailStore } from './store';
@@ -66,6 +67,7 @@ function isAmbiguous(verdict: Verdict, confidence: number): boolean {
 
 export async function analyze(message: Message): Promise<Analysis> {
   emailStore.saveMessage(message);
+  if (message.direction === 'inbound' && message.source === 'external') recordScored();
 
   let signals = [...runStaticScorers(message), ...runDetectors(message), ...await contentSignals(message)];
   let scores = aggregate(signals);

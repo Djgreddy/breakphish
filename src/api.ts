@@ -26,6 +26,7 @@ import { portalLink, digestHtml, signPortalToken } from './quarantinePortal';
 import { appToken } from './directory/graphProvider';
 import { publicAiConfig, saveAiConfig } from './aiConfig';
 import { testLlm } from './emailsec/llm';
+import { getUsage } from './aiUsage';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -229,6 +230,7 @@ export function buildApi() {
     const r = await testLlm();
     res.json(r);
   });
+  api.get('/ai/usage', requirePartner, (_req, res) => res.json(getUsage()));
 
   // ---- Team members (partner staff) ----
   const publicMember = (m: any) => ({ ...m, passwordHash: undefined, totpSecret: undefined });

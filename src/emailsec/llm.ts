@@ -4,7 +4,10 @@
 // provider is 'none' it is disabled and the pipeline stays fully static.
 
 import { getLlmConfig } from '../aiConfig';
+import { recordLlmCall } from '../aiUsage';
 import type { Message } from './types';
+
+type Call = { content: string; usage: { input: number; output: number } };
 
 export interface LlmResult {
   verdict: 'clean' | 'spam' | 'phishing' | 'bec' | 'impersonation';
@@ -41,7 +44,7 @@ function parse(text: string): LlmResult | null {
   } catch { return null; }
 }
 
-async function callAzure(m: Message): Promise<string> {
+async function callAzure(m: Message): Promise<Call> {
   const c = getLlmConfig();
   const url = `${c.endpoint.replace(/\/$/, '')}/openai/deployments/${c.azureDeployment}/chat/completions?api-version=${c.azureApiVersion}`;
   const r = await fetch(url, {
@@ -49,18 +52,20 @@ async function callAzure(m: Message): Promise<string> {
     body: JSON.stringify({ messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: userPrompt(m) }], temperature: 0, max_tokens: 120, response_format: { type: 'json_object' } }),
   });
   if (!r.ok) throw new Error(`azure ${r.status}: ${await r.text()}`);
-  return (await r.json()).choices?.[0]?.message?.content ?? '';
+  const j: any = await r.json();
+  return { content: j.choices?.[0]?.message?.content ?? '', usage: { input: j.usage?.prompt_tokens ?? 0, output: j.usage?.completion_tokens ?? 0 } };
 }
-async function callOpenAI(m: Message): Promise<string> {
+async function callOpenAI(m: Message): Promise<Call> {
   const c = getLlmConfig();
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST', headers: { authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({ model: c.model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: userPrompt(m) }], temperature: 0, max_tokens: 120, response_format: { type: 'json_object' } }),
   });
   if (!r.ok) throw new Error(`openai ${r.status}: ${await r.text()}`);
-  return (await r.json()).choices?.[0]?.message?.content ?? '';
+  const j: any = await r.json();
+  return { content: j.choices?.[0]?.message?.content ?? '', usage: { input: j.usage?.prompt_tokens ?? 0, output: j.usage?.completion_tokens ?? 0 } };
 }
-async function callAnthropic(m: Message): Promise<string> {
+async function callAnthropic(m: Message): Promise<Call> {
   const c = getLlmConfig();
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -68,7 +73,7 @@ async function callAnthropic(m: Message): Promise<string> {
   });
   if (!r.ok) throw new Error(`anthropic ${r.status}: ${await r.text()}`);
   const j: any = await r.json();
-  return (j.content ?? []).map((c: any) => c.text ?? '').join('');
+  return { content: (j.content ?? []).map((c: any) => c.text ?? '').join(''), usage: { input: j.usage?.input_tokens ?? 0, output: j.usage?.output_tokens ?? 0 } };
 }
 
 // For the "Test connection" button — runs one classification on a sample BEC email.
@@ -82,8 +87,8 @@ export async function testLlm(): Promise<{ ok: boolean; result?: LlmResult; erro
   } as any;
   try {
     const prov = getLlmConfig().provider;
-    const text = prov === 'azure' ? await callAzure(sample) : prov === 'anthropic' ? await callAnthropic(sample) : await callOpenAI(sample);
-    const r = parse(text);
+    const call = prov === 'azure' ? await callAzure(sample) : prov === 'anthropic' ? await callAnthropic(sample) : await callOpenAI(sample);
+    const r = parse(call.content);
     if (!r) return { ok: false, error: 'Provider responded but the output could not be parsed.' };
     return { ok: true, result: r };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
@@ -94,10 +99,11 @@ export async function classifyIntent(m: Message): Promise<LlmResult | null> {
   if (!llmEnabled()) return null;
   try {
     const prov = getLlmConfig().provider;
-    const text = prov === 'azure' ? await callAzure(m)
+    const call = prov === 'azure' ? await callAzure(m)
       : prov === 'anthropic' ? await callAnthropic(m)
       : await callOpenAI(m);
-    return parse(text);
+    recordLlmCall(call.usage.input, call.usage.output);
+    return parse(call.content);
   } catch (e) {
     console.error('[llm] classify failed:', (e as Error).message);
     return null;
