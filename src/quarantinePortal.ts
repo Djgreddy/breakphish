@@ -51,31 +51,59 @@ async function mailboxFor(customerId: string, email: string) {
 
 const esc = (s: string) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
-// The digest email body (also used as the portal page). items link back with the token.
+const VERDICT_COLOR: Record<string, string> = {
+  clean: '#6b7280', spam: '#d97706', spam_likely: '#d97706', phishing: '#dc2626',
+  malware: '#dc2626', impersonation: '#dc2626', policy_infomail: '#2563eb', policy_geo: '#dc2626',
+};
+// The digest email body (also used as the portal page). Table-based + inline
+// styles for email-client compatibility; light theme for readability.
 export function digestHtml(customerId: string, email: string, token: string): string {
   const base = config.publicBaseUrl;
   const items = quarantinedForUser(customerId, email);
+  const btn = (label: string, href: string, bg: string, fg: string, border = bg) =>
+    `<a href="${href}" style="display:inline-block;min-width:74px;text-align:center;padding:8px 14px;margin:0 0 6px;background:${bg};color:${fg};text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;border:1px solid ${border}">${label}</a>`;
   const rows = items.map((m: any) => {
     const a = emailStore.analysisFor(m.id);
     const verdict = a?.verdict ?? 'spam';
+    const color = VERDICT_COLOR[verdict] ?? '#6b7280';
     const act = (doo: string) => `${base}/portal/action?token=${encodeURIComponent(token)}&id=${encodeURIComponent(m.id)}&do=${doo}`;
-    return `<tr><td style="padding:14px;border:1px solid #2a2a3a;background:#1b1b28;color:#ddd">
-      <span style="display:inline-block;background:#2563eb;color:#fff;font-size:11px;padding:2px 8px;border-radius:4px">${esc(verdictLabel(verdict))}</span>
-      <div style="color:#8a8; font-size:12px;margin-top:6px">${esc(new Date(m.receivedAt).toLocaleString())}</div>
-      <div style="font-weight:600;margin:4px 0">${esc(m.fromDisplay || m.fromAddress)} &lt;${esc(m.fromAddress)}&gt;</div>
-      <div style="color:#aaa">${esc(m.subject)}</div>
-    </td><td style="padding:14px;border:1px solid #2a2a3a;background:#1b1b28;white-space:nowrap;text-align:right">
-      <a href="${act('deliver')}" style="display:block;margin:4px 0;padding:6px 14px;background:#16a34a;color:#fff;text-decoration:none;border-radius:6px;font-size:13px">Deliver</a>
-      <a href="${base}/portal/preview?token=${encodeURIComponent(token)}&id=${encodeURIComponent(m.id)}" style="display:block;margin:4px 0;padding:6px 14px;border:1px solid #555;color:#ddd;text-decoration:none;border-radius:6px;font-size:13px">Preview</a>
-      <a href="${act('delete')}" style="display:block;margin:4px 0;padding:6px 14px;background:#dc2626;color:#fff;text-decoration:none;border-radius:6px;font-size:13px">Delete</a>
+    return `<tr><td style="padding:0 24px 14px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e6e8ef;border-radius:10px;border-collapse:separate;overflow:hidden">
+        <tr>
+          <td style="padding:16px 18px;vertical-align:top">
+            <span style="display:inline-block;background:${color};color:#fff;font-size:11px;font-weight:700;letter-spacing:.03em;padding:3px 9px;border-radius:5px;text-transform:uppercase">${esc(verdictLabel(verdict))}</span>
+            <div style="color:#8a90a2;font-size:12px;margin-top:10px">${esc(new Date(m.receivedAt).toLocaleString())}</div>
+            <div style="font-weight:600;color:#1c2338;font-size:14px;margin:3px 0">${esc(m.fromDisplay || m.fromAddress)} <span style="color:#8a90a2;font-weight:400">&lt;${esc(m.fromAddress)}&gt;</span></div>
+            <div style="color:#5b6478;font-size:13.5px">${esc(m.subject || '(no subject)')}</div>
+          </td>
+          <td style="padding:16px 18px;vertical-align:top;text-align:right;white-space:nowrap">
+            ${btn('Deliver', act('deliver'), '#16a34a', '#fff')}<br>
+            ${btn('Preview', `${base}/portal/preview?token=${encodeURIComponent(token)}&id=${encodeURIComponent(m.id)}`, '#ffffff', '#374151', '#d1d5db')}<br>
+            ${btn('Delete', act('delete'), '#dc2626', '#fff')}
+          </td>
+        </tr>
+      </table>
     </td></tr>`;
   }).join('');
-  return `<div style="font-family:Segoe UI,Arial,sans-serif;max-width:640px;margin:auto;background:#12121c;border-radius:10px;overflow:hidden">
-    <div style="background:#4f46e5;padding:22px 24px"><h1 style="color:#fff;font-size:20px;margin:0">Your Quarantine Digest</h1></div>
-    <div style="padding:18px 24px;color:#ccc">Hi ${esc(email)}, you have ${items.length} quarantined email${items.length === 1 ? '' : 's'}.</div>
-    <table style="width:100%;border-collapse:collapse">${rows || '<tr><td style="padding:20px;color:#888">No quarantined mail.</td></tr>'}</table>
-    <div style="padding:16px 24px;color:#777;font-size:12px">Powered by BreakPhish Security · <a href="${base}/portal/quarantine?token=${encodeURIComponent(token)}" style="color:#8ab">Open quarantine portal</a></div>
-  </div>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fb;padding:24px 0;font-family:'Segoe UI',Helvetica,Arial,sans-serif">
+    <tr><td align="center">
+      <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(20,27,46,.08)">
+        <tr><td style="background:linear-gradient(135deg,#4f46e5,#6366f1);padding:26px 24px">
+          <div style="color:#fff;font-size:21px;font-weight:700">🛡 Your Quarantine Digest</div>
+          <div style="color:#dcdcff;font-size:13px;margin-top:4px">BreakPhish Security</div>
+        </td></tr>
+        <tr><td style="padding:22px 24px 6px">
+          <div style="color:#1c2338;font-size:15px;font-weight:600">Hi ${esc(email.split('@')[0])},</div>
+          <div style="color:#5b6478;font-size:14px;margin-top:4px">You have <b style="color:#1c2338">${items.length}</b> message${items.length === 1 ? '' : 's'} held in quarantine. Review them below — <b>Deliver</b> to send to your inbox, <b>Preview</b> to view safely, or <b>Delete</b> to remove.</div>
+        </td></tr>
+        ${rows || '<tr><td style="padding:20px 24px;color:#8a90a2;font-size:14px">No quarantined mail. 🎉</td></tr>'}
+        <tr><td style="padding:14px 24px 26px">
+          <a href="${base}/portal/quarantine?token=${encodeURIComponent(token)}" style="display:inline-block;padding:11px 20px;background:#1c2338;color:#fff;text-decoration:none;border-radius:8px;font-size:13.5px;font-weight:600">Open quarantine portal →</a>
+          <div style="color:#9aa1b6;font-size:11.5px;margin-top:16px;border-top:1px solid #eef0f7;padding-top:14px">This digest was sent by your email security provider. Only act on messages you recognize. Links are secured to your account.</div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
 }
 function verdictLabel(v: string) {
   return ({ clean: 'Clean', spam: 'Spam', spam_likely: 'Spam-Likely', phishing: 'Phishing', malware: 'Malware', impersonation: 'Impersonation', policy_infomail: 'Infomail', policy_geo: 'Policy-Geo' } as any)[v] ?? v;

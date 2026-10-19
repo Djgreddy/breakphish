@@ -65,9 +65,10 @@ export async function analyze(message: Message): Promise<Analysis> {
   // (incl. block rules) is NOT re-applied, so it can't bounce back to quarantine.
   const released = emailStore.isReleased(message.internetMessageId);
   const act = released ? 'deliver' : dispositionFor(message.tenantId, verdict, message);
-  const isThreat = ['phishing', 'malware', 'impersonation', 'policy_geo'].includes(verdict);
-  const remediated = !released && isThreat && act === 'quarantine'; // post-delivery clawback
-  const disposition = remediated ? 'remediated' : act;
+  // Auto-handling is labeled by its disposition (deliver / junk / quarantine).
+  // "Remediated" is reserved for a manual admin remediation action.
+  const disposition = act;
+  const remediated = false;
 
   const analysis: Analysis = {
     messageId: message.id,
