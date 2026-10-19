@@ -136,6 +136,8 @@ const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediat
 const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
 
 const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',filterRange:'all',filterDomain:'',dateFrom:'',dateTo:'',page:0,session:null};
+let PRESET_STATUS=null;
+function reviewQuarantine(){PRESET_STATUS='quarantine';go('tracker');}
 
 /* ---------- auth ---------- */
 async function boot(){
@@ -235,7 +237,7 @@ const NAV_PARTNER=[
   ['p-audit','Audit Logs','list'],
   ['settings','Settings','gear'],
 ];
-const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Message Log','mail'],['quarantine','Quarantine','lock'],['users','Users','users'],['policy','Policy','shield'],['analytics','Analytics','chart'],['audit','Audit Logs','list'],['settings','Settings','gear']];
+const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Message Log','mail'],['users','Users','users'],['policy','Policy','shield'],['analytics','Analytics','chart'],['audit','Audit Logs','list'],['settings','Settings','gear']];
 function renderNav(){
   const nav=document.getElementById('nav');nav.innerHTML='';
   (STATE.role==='partner'?NAV_PARTNER:NAV_ADMIN).forEach(([id,label,ic])=>{
@@ -254,6 +256,7 @@ function chrome(){
 }
 async function go(view){
   STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';STATE.filterRange='all';STATE.filterDomain='';
+  if(view==='tracker'&&PRESET_STATUS){STATE.filterStatus=PRESET_STATUS;}PRESET_STATUS=null;
   document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Message Log',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Message Log','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs','p-dashboard':'Partner Dashboard','audit':'Audit Logs','analytics':'Analytics'})[view]||view;
   chrome();
   const host=document.getElementById('view');host.innerHTML='<div class="loading"><div class="spin"></div>Loading live data…</div>';
@@ -355,7 +358,7 @@ VIEWS.dashboard=async function(){
   // bottom row: pending release + usage | targeted mailboxes
   const grid=el('<div style="display:grid;grid-template-columns:360px 1fr;gap:16px;margin-top:16px"></div>');
   const left=el('<div></div>');
-  const pr=el(`<div class="card p" style="margin-bottom:16px"><div style="display:flex;align-items:center"><h3 style="flex:1;font-size:14px">Pending Release</h3><a href="#" style="font-size:12px;color:var(--brand)" onclick="go('quarantine');return false">Review →</a></div><div style="font-size:12px;color:var(--faint);margin-top:8px">Requests</div><div style="font-size:30px;font-weight:700">${d.pendingReleases}</div></div>`);
+  const pr=el(`<div class="card p" style="margin-bottom:16px"><div style="display:flex;align-items:center"><h3 style="flex:1;font-size:14px">Pending Release</h3><a href="#" style="font-size:12px;color:var(--brand)" onclick="reviewQuarantine();return false">Review →</a></div><div style="font-size:12px;color:var(--faint);margin-top:8px">Requests</div><div style="font-size:30px;font-weight:700">${d.pendingReleases}</div></div>`);
   left.appendChild(pr);
   const u=d.usage||{domains:0,mailboxes:0,licenses:0};
   const usage=el(`<div class="card p"><h3 style="font-size:14px;margin-bottom:12px">Usage</h3><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">

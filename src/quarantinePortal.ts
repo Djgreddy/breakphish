@@ -37,7 +37,10 @@ export function verifyPortalToken(token: string): { customerId: string; email: s
 }
 
 function quarantinedForUser(customerId: string, email: string) {
-  return emailStore.quarantinedForTenant(customerId).filter((m: any) => (m.to || '').toLowerCase() === email.toLowerCase());
+  // quarantinedForTenant returns ANALYSES — map each to its message, then match recipient.
+  return emailStore.quarantinedForTenant(customerId)
+    .map((a: any) => emailStore.messages.get(a.messageId))
+    .filter((m: any): m is any => !!m && (m.to || '').toLowerCase() === email.toLowerCase());
 }
 
 async function mailboxFor(customerId: string, email: string) {
