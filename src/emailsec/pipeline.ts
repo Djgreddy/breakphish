@@ -5,6 +5,8 @@
 
 import type { Message, Analysis, Signal, Verdict } from './types';
 import { runStaticScorers } from './scorers';
+import { runDetectors } from './detectors';
+import { classifyIntent, llmEnabled } from './llm';
 import { makeClassifier } from './classifier';
 import { dispositionFor } from '../policy';
 import { emailStore } from './store';
@@ -54,12 +56,34 @@ async function contentSignals(m: Message): Promise<Signal[]> {
   return out;
 }
 
+// The "ambiguous middle": not confidently clean, not already a hard threat —
+// exactly where static signatures miss payload-less BEC. These get the LLM.
+function isAmbiguous(verdict: Verdict, confidence: number): boolean {
+  if (verdict === 'malware' || verdict === 'phishing' || verdict === 'impersonation') return false; // already caught
+  if (verdict === 'clean') return confidence < 0.92;    // not confidently clean
+  return confidence < 0.85;                             // spam/infomail with soft confidence
+}
+
 export async function analyze(message: Message): Promise<Analysis> {
   emailStore.saveMessage(message);
 
-  const signals = [...runStaticScorers(message), ...await contentSignals(message)];
-  const scores = aggregate(signals);
-  const { verdict, confidence } = decideVerdict(scores);
+  let signals = [...runStaticScorers(message), ...runDetectors(message), ...await contentSignals(message)];
+  let scores = aggregate(signals);
+  let { verdict, confidence } = decideVerdict(scores);
+
+  // Tier 2 — behavioral AI only on the ambiguous middle, and only for inbound
+  // external mail (where BEC/phishing lives). Fail-open to the static verdict.
+  if (llmEnabled() && message.direction === 'inbound' && message.source === 'external' && isAmbiguous(verdict, confidence)) {
+    const r = await classifyIntent(message);
+    if (r && r.confidence >= 0.6 && r.verdict !== 'clean') {
+      const cat = r.verdict === 'bec' ? 'impersonation' : r.verdict === 'spam' ? 'spam' : r.verdict;
+      signals = [...signals, { code: 'ai_intent', detail: `AI: ${r.verdict} — ${r.reason}`, category: cat as any, weight: Math.round(r.confidence * 55) }];
+      scores = aggregate(signals);
+      ({ verdict, confidence } = decideVerdict(scores));
+    } else if (r) {
+      signals = [...signals, { code: 'ai_intent', detail: `AI: clean — ${r.reason}`, category: 'spam', weight: 0 }];
+    }
+  }
 
   // If an admin manually released this message, it stays delivered — policy
   // (incl. block rules) is NOT re-applied, so it can't bounce back to quarantine.

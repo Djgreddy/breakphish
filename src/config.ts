@@ -15,6 +15,21 @@ export const config = {
   // 'console' just logs the email. Swap for a real ESP transport in prod.
   emailTransport: (process.env.EMAIL_TRANSPORT ?? 'console') as 'console',
 
+  // Behavioral-AI classifier. Provider-agnostic: set LLM_PROVIDER + the matching
+  // key/endpoint. 'none' (default) keeps detection fully static (no API calls).
+  // Tiered: only the ambiguous middle is escalated to the model.
+  llm: {
+    provider: (process.env.LLM_PROVIDER ?? 'none') as 'none' | 'azure' | 'openai' | 'anthropic',
+    apiKey: process.env.LLM_API_KEY ?? '',
+    // Azure: the resource endpoint, e.g. https://my-res.openai.azure.com
+    endpoint: process.env.LLM_ENDPOINT ?? '',
+    // OpenAI/Anthropic: the model name; Azure: ignored (uses deployment).
+    model: process.env.LLM_MODEL ?? 'gpt-4o-mini',
+    // Azure deployment name + api version.
+    azureDeployment: process.env.LLM_AZURE_DEPLOYMENT ?? '',
+    azureApiVersion: process.env.LLM_AZURE_API_VERSION ?? '2024-06-01',
+  },
+
   // Microsoft Graph multi-tenant app (only used when directoryProvider = 'graph').
   graph: {
     clientId: process.env.GRAPH_CLIENT_ID ?? '00000000-0000-0000-0000-000000000000',
