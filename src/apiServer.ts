@@ -18,6 +18,7 @@ import { hydratePolicy } from './policy';
 import { hydrateTeam } from './team';
 import { hydrateAudit } from './audit';
 import { buildWebhookApp } from './webhooks';
+import { buildPortalApp } from './quarantinePortal';
 import { hydrateSubscriptions, renewDue } from './emailsec/subscriptions';
 import { buildApi, connectAndSeed } from './api';
 import { buildConsentApp } from './consentServer';
@@ -87,6 +88,7 @@ async function main() {
 
   const app = express();
   app.use(buildWebhookApp());                // /webhooks/graph (public, clientState-validated)
+  app.use(buildPortalApp());                 // /portal/* (public, token-authenticated end-user quarantine)
   app.use(buildAuthApp());                   // /auth/* (public)
   app.use('/api', buildApi());               // protected by session middleware
   app.use(buildConsentApp());               // /onboarding/consent/*

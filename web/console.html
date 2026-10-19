@@ -135,7 +135,7 @@ const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p
 const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated'};
 const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
 
-const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',filterRange:'all',dateFrom:'',dateTo:'',page:0,session:null};
+const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',filterRange:'all',filterDomain:'',dateFrom:'',dateTo:'',page:0,session:null};
 
 /* ---------- auth ---------- */
 async function boot(){
@@ -226,7 +226,7 @@ async function logout(){await authPost('/auth/logout');STATE.session=null;render
 const ICONS={home:'M4 11l8-7 8 7M6 10v9a1 1 0 001 1h10a1 1 0 001-1v-9',mail:'M3 5h18v14H3zM4 7l8 6 8-6',grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',users:'M9 8a3 3 0 100 6 3 3 0 000-6zM3 20c0-3 3-5 6-5s6 2 6 5',shield:'M12 3l7 2.5V11c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V5.5z',lock:'M5 10h14v10H5zM8 10V7a4 4 0 018 0v3',gear:'M12 9a3 3 0 100 6 3 3 0 000-6zM12 3v3M12 18v3M4 12H1M23 12h-3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1',chart:'M4 20V10M10 20V4M16 20v-7M22 20H2',dollar:'M12 2v20M17 6a4 4 0 00-4-2h-1a3 3 0 000 6h2a3 3 0 010 6h-1a4 4 0 01-4-2',list:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01'};
 function icon(n){return `<svg viewBox="0 0 24 24" fill="none"><path d="${ICONS[n]}" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>`;}
 const NAV_PARTNER=[
-  ['p-tracker','Live Email Tracker','mail'],
+  ['p-tracker','Message Log','mail'],
   ['customers','Customers','grid'],
   ['p-team','Team Members','users'],
   ['p-policy','Policy','shield'],
@@ -235,7 +235,7 @@ const NAV_PARTNER=[
   ['p-audit','Audit Logs','list'],
   ['settings','Settings','gear'],
 ];
-const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Live Email Tracker','mail'],['quarantine','Quarantine','lock'],['users','Users','users'],['policy','Policy','shield'],['analytics','Analytics','chart'],['audit','Audit Logs','list'],['settings','Settings','gear']];
+const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Message Log','mail'],['quarantine','Quarantine','lock'],['users','Users','users'],['policy','Policy','shield'],['analytics','Analytics','chart'],['audit','Audit Logs','list'],['settings','Settings','gear']];
 function renderNav(){
   const nav=document.getElementById('nav');nav.innerHTML='';
   (STATE.role==='partner'?NAV_PARTNER:NAV_ADMIN).forEach(([id,label,ic])=>{
@@ -253,8 +253,8 @@ function chrome(){
   renderNav();
 }
 async function go(view){
-  STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';STATE.filterRange='all';
-  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Live Email Tracker',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Live Email Tracker','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs','p-dashboard':'Partner Dashboard','audit':'Audit Logs','analytics':'Analytics'})[view]||view;
+  STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';STATE.filterRange='all';STATE.filterDomain='';
+  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Message Log',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Message Log','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs','p-dashboard':'Partner Dashboard','audit':'Audit Logs','analytics':'Analytics'})[view]||view;
   chrome();
   const host=document.getElementById('view');host.innerHTML='<div class="loading"><div class="spin"></div>Loading live data…</div>';
   try{const node=await VIEWS[view]();host.innerHTML='';host.appendChild(node);}
@@ -376,19 +376,21 @@ function stat(l,v,color){return `<div class="s"><div class="l">${l}</div><div cl
 
 VIEWS.tracker=async function(){return trackerNode();};
 async function trackerNode(){
-  const qs=new URLSearchParams({page:STATE.page,from:STATE.filterFrom,to:STATE.filterTo,direction:STATE.filterDir,status:STATE.filterStatus,verdict:STATE.filterVerdict,q:STATE.filterText,range:STATE.filterRange,dfrom:STATE.dateFrom,dto:STATE.dateTo});
+  const qs=new URLSearchParams({page:STATE.page,from:STATE.filterFrom,to:STATE.filterTo,direction:STATE.filterDir,status:STATE.filterStatus,verdict:STATE.filterVerdict,q:STATE.filterText,range:STATE.filterRange,domain:STATE.filterDomain,dfrom:STATE.dateFrom,dto:STATE.dateTo});
+  if(!STATE._domains){try{const c=await api('/customers/'+STATE.customerId);STATE._domains=[...new Set([c.domain,...(c.connection?.verifiedDomains||[])].filter(Boolean))];}catch(e){STATE._domains=[];}}
   const data=await api(`/customers/${STATE.customerId}/messages?${qs}`);
   const v=el('<div></div>');
-  const head=el(`<div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between"><div><h1>Live Email Tracker</h1><p>${STATE._cust.name} · inbound &amp; outbound, scored in real time</p></div></div>`);
+  const head=el(`<div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between"><div><h1>Message Log</h1><p>${STATE._cust.name} · inbound &amp; outbound, scored in real time</p></div></div>`);
   const scan=el('<button class="btn teal sm">↻ Scan mail</button>');
   scan.onclick=async()=>{scan.textContent='Scanning…';scan.disabled=true;try{const r=await api('/customers/'+STATE.customerId+'/scan-mail',{method:'POST'});toast('Scanned '+r.mailboxes+' mailbox(es), '+r.scored+' new message(s)');refresh();}catch(e){toast('Scan failed: '+e.message);scan.textContent='↻ Scan mail';scan.disabled=false;}};
   head.appendChild(scan);
   v.appendChild(head);
   const card=el('<div class="card"></div>');
   const RANGE_OPTS=[['all','All time'],['today','Today'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']];
+  const domOpts=(STATE._domains||[]).map(dn=>`<option value="${dn}" ${STATE.filterDomain===dn?'selected':''}>${dn}</option>`).join('');
   const filt=el(`<div class="filters">
-    <input id="ffrom" placeholder="From" value="${STATE.filterFrom}" style="min-width:140px">
-    <input id="fto" placeholder="To" value="${STATE.filterTo}" style="min-width:140px">
+    <input id="fq" placeholder="Search sender, recipient, subject or keywords…" value="${STATE.filterText||''}" style="flex:1;min-width:240px">
+    <select id="fdom"><option value="">All domains</option>${domOpts}</select>
     <select id="frange">${RANGE_OPTS.map(([v2,l])=>`<option value="${v2}" ${STATE.filterRange===v2?'selected':''}>${l}</option>`).join('')}</select>
     <input id="fcfrom" type="date" style="${STATE.filterRange==='custom'?'':'display:none'}">
     <input id="fcto" type="date" style="${STATE.filterRange==='custom'?'':'display:none'}">
@@ -397,8 +399,8 @@ async function trackerNode(){
     <select id="fverd"><option value="">All verdicts</option>${Object.entries(VERDICT_LABEL).map(([k,l])=>`<option value="${k}" ${STATE.filterVerdict===k?'selected':''}>${l}</option>`).join('')}</select>
   </div>`);
   let deb;
-  const onText=(id,key)=>{filt.querySelector(id).oninput=e=>{clearTimeout(deb);deb=setTimeout(()=>{STATE[key]=e.target.value;STATE.page=0;refresh();},300);};};
-  onText('#ffrom','filterFrom');onText('#fto','filterTo');
+  filt.querySelector('#fq').oninput=e=>{clearTimeout(deb);deb=setTimeout(()=>{STATE.filterText=e.target.value.trim();STATE.page=0;refresh();},300);};
+  filt.querySelector('#fdom').onchange=e=>{STATE.filterDomain=e.target.value;STATE.page=0;refresh();};
   filt.querySelector('#frange').onchange=e=>{STATE.filterRange=e.target.value;STATE.page=0;refresh();};
   filt.querySelector('#fcfrom').onchange=e=>{STATE.dateFrom=e.target.value;STATE.filterRange='custom';STATE.page=0;refresh();};
   filt.querySelector('#fcto').onchange=e=>{STATE.dateTo=e.target.value;STATE.filterRange='custom';STATE.page=0;refresh();};
@@ -530,13 +532,35 @@ VIEWS.users=async function(){
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Users</h1><p>${data.total} mailboxes · synced from Microsoft 365</p></div>`));
   const card=el('<div class="card"></div>');
-  const tbl=el(`<table><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Status</th></tr></thead><tbody></tbody></table>`);
+  const tbl=el(`<table><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Status</th><th style="text-align:right">Quarantine access</th></tr></thead><tbody></tbody></table>`);
   const tb=tbl.querySelector('tbody');
-  data.rows.forEach(u=>tb.appendChild(el(`<tr><td style="font-weight:600">${u.name}</td><td style="color:var(--muted)">${u.email}</td><td>${u.department||'—'}</td><td><span class="pill ${u.enabled?'p-ok':'p-muted'}"><span class="d" style="background:${u.enabled?'var(--ok)':'var(--faint)'}"></span>${u.enabled?'Active':'Disabled'}</span></td></tr>`)));
-  if(!data.rows.length)tb.appendChild(el('<tr><td colspan="4" style="padding:36px;text-align:center;color:var(--faint)">No synced users.</td></tr>'));
+  data.rows.forEach(u=>{
+    const row=el(`<tr><td style="font-weight:600">${u.name}</td><td style="color:var(--muted)">${u.email}</td><td>${u.department||'—'}</td><td><span class="pill ${u.enabled?'p-ok':'p-muted'}"><span class="d" style="background:${u.enabled?'var(--ok)':'var(--faint)'}"></span>${u.enabled?'Active':'Disabled'}</span></td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+    const act=row.children[4];
+    const link=el('<button class="btn sm" title="Copy a sign-in link so this user can release their own quarantined mail">Portal link</button>');
+    link.onclick=async()=>{try{const r=await api('/customers/'+STATE.customerId+'/users/'+encodeURIComponent(u.email)+'/portal-link');await navigator.clipboard.writeText(r.link).catch(()=>{});toast('Portal link copied');}catch(e){toast('Failed: '+e.message);}};
+    act.appendChild(link);
+    const dig=el('<button class="btn sm" style="margin-left:6px">Email digest</button>');
+    dig.onclick=()=>openDigest(u.email);
+    act.appendChild(dig);
+    tb.appendChild(row);
+  });
+  if(!data.rows.length)tb.appendChild(el('<tr><td colspan="5" style="padding:36px;text-align:center;color:var(--faint)">No synced users.</td></tr>'));
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
+// Preview + send a quarantine digest for a user.
+async function openDigest(email){
+  const modal=el(`<div class="modal" style="max-width:720px;height:80vh;display:flex;flex-direction:column"><div class="modal-h"><h2 style="flex:1">Quarantine digest — ${email}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="dgb" style="flex:1;min-height:0;overflow:auto">Loading preview…</div><div style="display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)"><button class="btn" onclick="closeModal()">Close</button><div style="flex:1"></div><button class="btn primary" id="dgsend">Send digest email</button></div></div>`);
+  showModal(modal);const b=modal.querySelector('#dgb');
+  try{const r=await api('/customers/'+STATE.customerId+'/digest/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email})});
+    b.innerHTML='';const frame=el('<div style="background:#0c0c14;padding:16px;border-radius:10px"></div>');frame.innerHTML=r.html;b.appendChild(frame);
+  }catch(e){b.textContent='Preview failed: '+e.message;}
+  modal.querySelector('#dgsend').onclick=async(ev)=>{ev.target.textContent='Sending…';ev.target.disabled=true;
+    try{await api('/customers/'+STATE.customerId+'/digest/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email})});toast('Digest sent to '+email);closeModal();}
+    catch(e){toast('Send failed: '+e.message);ev.target.textContent='Send digest email';ev.target.disabled=false;}};
+}
+
 /* ---- Partner Dashboard ---- */
 VIEWS['p-dashboard']=async function(){
   const d=await api('/analytics?scope=all&range='+DASH_RANGE);

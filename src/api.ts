@@ -22,6 +22,8 @@ import { getSettings, saveSettings } from './settings';
 import { listTeam, saveTeamMember, deleteTeamMember } from './team';
 import { hashPassword } from './auth/localAuth';
 import { audit, listAudit, distinctAuditActions } from './audit';
+import { portalLink, digestHtml, signPortalToken } from './quarantinePortal';
+import { appToken } from './directory/graphProvider';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -474,12 +476,19 @@ export function buildApi() {
       else if (range === 'custom') { from = Date.parse(String(req.query.dfrom ?? '')) || 0; to = (Date.parse(String(req.query.dto ?? '')) + 864e5) || now; }
       rows = rows.filter(r => { const t = Date.parse(r.at); return t >= from && t <= to; });
     }
+    const domain = String(req.query.domain ?? '').toLowerCase();
     if (verdict) rows = rows.filter(r => r.verdict === verdict);
     if (direction) rows = rows.filter(r => r.direction === direction);
     if (status) rows = rows.filter(r => r.status === status);
     if (from) rows = rows.filter(r => r.from.toLowerCase().includes(from));
     if (to) rows = rows.filter(r => r.to.toLowerCase().includes(to));
-    if (q) rows = rows.filter(r => r.from.toLowerCase().includes(q) || r.to.toLowerCase().includes(q) || r.subject.toLowerCase().includes(q));
+    // one search box: sender, recipient, subject, or body keywords
+    if (q) rows = rows.filter(r => {
+      const m = emailStore.messages.get(r.id);
+      return r.from.toLowerCase().includes(q) || r.to.toLowerCase().includes(q) || r.subject.toLowerCase().includes(q) || (m?.bodyText ?? '').toLowerCase().includes(q);
+    });
+    // filter by a verified domain (either side of the message)
+    if (domain) rows = rows.filter(r => r.from.toLowerCase().endsWith('@' + domain) || r.from.toLowerCase().endsWith('.' + domain) || r.to.toLowerCase().endsWith('@' + domain) || r.to.toLowerCase().endsWith('.' + domain));
     const total = rows.length;
     const slice = rows.slice(page * per, page * per + per).map((r, i) => ({ ...r, verdictLabel: VERDICT_LABEL[r.verdict], service, idx: page * per + i }));
     res.json({ rows: slice, total, page, pages: Math.ceil(total / per) || 1 });
@@ -524,6 +533,37 @@ export function buildApi() {
         await saveRule({ scope: option === 'block_org' ? 'partner' : id, kind: 'block', data: { sender: m.fromAddress, comment: `Blocked via remediation (${m.subject})` } });
       }
       logReq(req, 'mail.remediate', m.subject, `from ${m.fromAddress}` + (option !== 'plain' ? ` (+${option})` : ''), id);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
+  // Quarantine digest + end-user portal access
+  api.get('/customers/:id/users/:email/portal-link', requireAuth, requireCustomerAccess, (req, res) => {
+    res.json({ link: portalLink(req.params.id, req.params.email) });
+  });
+  api.post('/customers/:id/digest/preview', requireAuth, requireCustomerAccess, (req, res) => {
+    const email = String(req.body?.email ?? '');
+    if (!email) return res.status(400).json({ error: 'email required' });
+    res.json({ html: digestHtml(req.params.id, email, signPortalToken(req.params.id, email)) });
+  });
+  // Send the digest to a user via Graph sendMail (requires Mail.Send app permission).
+  api.post('/customers/:id/digest/send', requireAuth, requireCustomerAccess, async (req, res) => {
+    try {
+      const id = req.params.id; const email = String(req.body?.email ?? '');
+      if (!email) return res.status(400).json({ error: 'email required' });
+      const conn = getConnection(id);
+      if (!conn?.entraTenantId) return res.status(400).json({ error: 'customer not connected' });
+      const html = digestHtml(id, email, signPortalToken(id, email));
+      const token = await appToken(conn.entraTenantId);
+      const r = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}/sendMail`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ message: { subject: 'Your Quarantine Digest', body: { contentType: 'HTML', content: html }, toRecipients: [{ emailAddress: { address: email } }] }, saveToSentItems: false }),
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        return res.status(502).json({ error: `sendMail failed (${r.status}). This usually means the Mail.Send application permission hasn't been granted in Azure.`, detail: txt.slice(0, 300) });
+      }
+      logReq(req, 'digest.send', email, undefined, id);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
