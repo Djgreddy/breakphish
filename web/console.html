@@ -149,7 +149,7 @@ function applySession(session){
   document.getElementById('who').style.display='inline';
   document.getElementById('who').textContent=session.name;
   document.getElementById('logoutBtn').style.display='inline-flex';
-  go(STATE.role==='partner'?'customers':'dashboard');
+  go(STATE.role==='partner'?'p-dashboard':'dashboard');
   applyBranding();
 }
 async function renderLogin(){
@@ -254,7 +254,7 @@ function chrome(){
 }
 async function go(view){
   STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';STATE.filterRange='all';
-  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Live Email Tracker',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Live Email Tracker','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs'})[view]||view;
+  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Live Email Tracker',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Live Email Tracker','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs','p-dashboard':'Partner Dashboard','audit':'Audit Logs','analytics':'Analytics'})[view]||view;
   chrome();
   const host=document.getElementById('view');host.innerHTML='<div class="loading"><div class="spin"></div>Loading live data…</div>';
   try{const node=await VIEWS[view]();host.innerHTML='';host.appendChild(node);}
@@ -537,6 +537,50 @@ VIEWS.users=async function(){
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
+/* ---- Partner Dashboard ---- */
+VIEWS['p-dashboard']=async function(){
+  const d=await api('/analytics?scope=all&range='+DASH_RANGE);
+  const v=el('<div></div>');
+  const head=el(`<div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between"><div><h1>Hello!</h1><p>Welcome to your Email Security Hub</p></div></div>`);
+  const seg=el('<div style="display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:3px"></div>');
+  [['7d','Last 7 Days'],['30d','Last 30 Days']].forEach(([val,lbl])=>{const b=el(`<button style="padding:7px 13px;border:none;border-radius:7px;font-size:12.5px;font-weight:600;background:${DASH_RANGE===val?'var(--brand)':'none'};color:${DASH_RANGE===val?'#fff':'var(--muted)'}">${lbl}</button>`);b.onclick=()=>{DASH_RANGE=val;go('p-dashboard');};seg.appendChild(b);});
+  head.appendChild(seg);v.appendChild(head);
+  const grid=el('<div style="display:grid;grid-template-columns:380px 1fr;gap:16px"></div>');
+  // left: usage + customers onboarded + pending
+  const left=el('<div></div>');
+  const p=d.partner||{usage:{domains:0,mailboxes:0,licenses:0},byService:{},totalCustomers:0};
+  const u=p.usage;
+  left.appendChild(el(`<div class="card p" style="margin-bottom:16px"><h3 style="font-size:14px;margin-bottom:12px">Usage</h3><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+    <div><div style="font-size:11px;color:var(--faint)">Domains</div><div style="font-size:22px;font-weight:700">${u.domains}</div></div>
+    <div><div style="font-size:11px;color:var(--faint)">Mailboxes</div><div style="font-size:22px;font-weight:700">${u.mailboxes}</div></div>
+    <div><div style="font-size:11px;color:var(--faint)">Licenses</div><div style="font-size:22px;font-weight:700">${u.licenses}</div></div></div></div>`));
+  // customers onboarded donut (conic)
+  const svc=p.byService||{};const total=p.totalCustomers||0;
+  const SVC_COLORS={'BreakPhish 365':'#22b8b0','BreakPhish Gateway':'#3b82f6','BreakPhish Unified':'#e11d48'};
+  let acc=0;const segs=[];Object.entries(svc).forEach(([k,n])=>{if(!n)return;const frac=total?n/total:0;segs.push(`${SVC_COLORS[k]} ${acc*360}deg ${(acc+frac)*360}deg`);acc+=frac;});
+  const donut=el(`<div class="card p" style="margin-bottom:16px"><h3 style="font-size:14px;margin-bottom:12px">Customers Onboarded</h3>
+    <div style="display:flex;align-items:center;gap:18px"><div style="width:120px;height:120px;border-radius:50%;background:${segs.length?`conic-gradient(${segs.join(',')})`:'var(--surface2)'};display:grid;place-items:center"><div style="width:78px;height:78px;border-radius:50%;background:var(--surface);display:grid;place-items:center"><div style="text-align:center"><div style="font-size:10px;color:var(--faint)">Total</div><div style="font-size:24px;font-weight:700">${total}</div></div></div></div>
+    <div style="font-size:12.5px">${Object.entries(svc).map(([k,n])=>`<div style="display:flex;align-items:center;gap:7px;margin:5px 0"><span style="width:10px;height:10px;border-radius:50%;background:${SVC_COLORS[k]};display:inline-block"></span>${k.replace('BreakPhish ','')} <span style="color:var(--muted);margin-left:auto">${n}</span></div>`).join('')}</div></div></div>`);
+  left.appendChild(donut);
+  left.appendChild(el(`<div class="card p"><div style="display:flex;align-items:center"><h3 style="flex:1;font-size:14px">Pending Release</h3><a href="#" style="font-size:12px;color:var(--brand)" onclick="go('customers');return false">Review →</a></div><div style="font-size:12px;color:var(--faint);margin-top:8px">Requests</div><div style="font-size:30px;font-weight:700">${d.pendingReleases}</div></div>`));
+  grid.appendChild(left);
+  // right: summary cards + verdict breakdown
+  const right=el('<div></div>');
+  const trend=(pctv)=>{if(pctv===0)return '';const up=pctv>0;return `<span style="font-size:12px;color:${up?'var(--ok)':'var(--danger)'}">${up?'+':''}${pctv}% ${up?'↗':'↘'}</span>`;};
+  const scard=(label,val,delta,color)=>`<div class="card p"><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">${label}</div><div style="font-size:24px;font-weight:700;margin:4px 0;${color?`color:${color}`:''}">${Number(val).toLocaleString()}</div>${delta!=null?trend(delta):''}</div>`;
+  right.appendChild(el(`<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px">
+    ${scard('Processed',d.processed,d.deltas.processed)}${scard('Clean',d.clean,d.deltas.clean,'var(--ok)')}${scard('Non-Clean',d.nonClean,d.deltas.nonClean,'var(--warn)')}${scard('Threats',d.threats,d.deltas.threats,'var(--danger)')}${scard('Remediated',d.remediated,d.deltas.remediated,'var(--violet)')}</div>`));
+  const bc=el('<div class="card"><div class="card-h"><h3>Breakdown of non-clean emails by verdict</h3></div></div>');
+  const brk=el('<div class="brk"></div>');
+  const entries=Object.entries(d.verdicts).filter(([k])=>k!=='clean').sort((a,b)=>b[1]-a[1]);const max=Math.max(...entries.map(e=>e[1]),1);
+  if(!entries.length)brk.appendChild(el('<div style="color:var(--faint);font-size:13px">No non-clean mail scored yet.</div>'));
+  entries.forEach(([vk,ct])=>{const pct=d.nonClean?Math.round(ct/d.nonClean*100):0;brk.appendChild(el(`<div class="r"><div style="font-size:13px">${VERDICT_LABEL[vk]||vk}</div><div class="bar"><span style="width:${Math.max(3,ct/max*100)}%;background:${VERDICT_BAR[vk]||'var(--brand)'}"></span></div><div class="vl">${pct<1?'<1':pct}% (${ct})</div></div>`));});
+  bc.appendChild(brk);right.appendChild(bc);
+  grid.appendChild(right);
+  v.appendChild(grid);
+  return v;
+};
+
 /* ---- Audit Logs (shared partner + customer) ---- */
 VIEWS['p-audit']=auditView; VIEWS['audit']=auditView;
 const AUDIT_RANGES=[['all','All time'],['today','Today'],['7d','Last 7 days'],['30d','Last 30 days']];
@@ -758,6 +802,43 @@ function actOpts(rec){return ACT_BASE.map(([v,l])=>[v, v===rec?l+' (Recommended)
 const ACT_OPTS=ACT_BASE; // generic (for attachments/geo/custom), with quarantine recommended tag added where used
 const ATT_TYPES=['Executable','Encrypted','Video','Audio','Zip/Compressed','Macros','HTML'];
 const GEO_REGIONS=['Asia','Europe','Africa','Oceania','Americas','Antarctica'];
+const COUNTRIES_BY_REGION={
+  Asia:['Afghanistan','China','India','Indonesia','Iran','Iraq','Israel','Japan','Jordan','Kazakhstan','Malaysia','Pakistan','Philippines','Saudi Arabia','Singapore','South Korea','Thailand','Turkey','United Arab Emirates','Vietnam','North Korea'],
+  Europe:['Austria','Belgium','Bulgaria','Czech Republic','Denmark','Finland','France','Germany','Greece','Hungary','Ireland','Italy','Netherlands','Norway','Poland','Portugal','Romania','Russia','Spain','Sweden','Switzerland','Ukraine','United Kingdom'],
+  Africa:['Algeria','Egypt','Ethiopia','Ghana','Kenya','Morocco','Nigeria','South Africa','Tanzania','Tunisia','Uganda'],
+  Oceania:['Australia','Fiji','New Zealand','Papua New Guinea'],
+  Americas:['Argentina','Brazil','Canada','Chile','Colombia','Mexico','Peru','United States','Venezuela'],
+  Antarctica:['Antarctica'],
+};
+// Grouped multi-select: regions expand to countries; selected shown as chips. Mutates `selected`.
+function geoSelect(selected){
+  const wrap=el('<div style="position:relative"></div>');
+  const ctrl=el('<div style="min-height:34px;border:1px solid var(--line);border-radius:8px;padding:3px 6px;background:var(--surface2);display:flex;flex-wrap:wrap;align-items:center;gap:4px;cursor:pointer;font-size:12.5px"></div>');
+  const caret=el('<span style="margin-left:auto;color:var(--faint);padding-right:2px">▾</span>');
+  const panel=el('<div style="position:fixed;z-index:200;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:4px;max-height:260px;overflow:auto;box-shadow:0 14px 36px -12px rgba(0,0,0,.55);display:none"></div>');
+  document.body.appendChild(panel);
+  const cbs={};
+  const refresh=()=>{ctrl.querySelectorAll('.chip,.ph').forEach(x=>x.remove());
+    if(!selected.length){const ph=el('<span class="ph" style="color:var(--faint);padding:3px 2px">Select countries…</span>');ctrl.insertBefore(ph,caret);}
+    else selected.forEach(c=>{const chip=el(`<span class="chip" style="display:inline-flex;align-items:center;gap:5px;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:2px 6px"><span>${c}</span><span style="color:var(--faint);cursor:pointer">✕</span></span>`);chip.querySelector('span:last-child').onclick=(e)=>{e.stopPropagation();const i=selected.indexOf(c);if(i>=0)selected.splice(i,1);if(cbs[c])cbs[c].checked=false;refresh();};ctrl.insertBefore(chip,caret);});
+    Object.keys(cbs).forEach(c=>cbs[c].checked=selected.includes(c));};
+  GEO_REGIONS.forEach(region=>{
+    const list=COUNTRIES_BY_REGION[region]||[];
+    const selCount=list.filter(c=>selected.includes(c)).length;
+    const hdr=el(`<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;font-weight:600;font-size:12.5px;cursor:pointer;border-radius:6px"><input type="checkbox"><span style="flex:1">${region}</span><span style="color:var(--faint);font-size:11px" class="cnt">${selCount}/${list.length}</span><span class="ex" style="color:var(--faint)">▸</span></div>`);
+    const sub=el('<div style="display:none;padding-left:14px"></div>');
+    const regionCb=hdr.querySelector('input');regionCb.checked=selCount===list.length&&list.length>0;
+    regionCb.onclick=(e)=>{e.stopPropagation();const on=regionCb.checked;list.forEach(c=>{if(on){if(!selected.includes(c))selected.push(c);}else{const i=selected.indexOf(c);if(i>=0)selected.splice(i,1);}});refresh();hdr.querySelector('.cnt').textContent=list.filter(c=>selected.includes(c)).length+'/'+list.length;};
+    hdr.onclick=(e)=>{if(e.target===regionCb)return;const open=sub.style.display==='none';sub.style.display=open?'block':'none';hdr.querySelector('.ex').textContent=open?'▾':'▸';};
+    list.forEach(c=>{const row=el('<label style="display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:6px;cursor:pointer;font-size:12.5px"></label>');const cb=el('<input type="checkbox">');cbs[c]=cb;cb.checked=selected.includes(c);cb.onchange=()=>{if(cb.checked){if(!selected.includes(c))selected.push(c);}else{const i=selected.indexOf(c);if(i>=0)selected.splice(i,1);}refresh();hdr.querySelector('.cnt').textContent=list.filter(x=>selected.includes(x)).length+'/'+list.length;regionCb.checked=list.every(x=>selected.includes(x));};row.onmouseover=()=>row.style.background='var(--surface2)';row.onmouseout=()=>row.style.background='none';row.appendChild(cb);row.appendChild(el('<span>'+c+'</span>'));sub.appendChild(row);});
+    panel.appendChild(hdr);panel.appendChild(sub);
+  });
+  const place=()=>{const r=ctrl.getBoundingClientRect();panel.style.left=r.left+'px';panel.style.width=r.width+'px';panel.style.top=(r.bottom+4)+'px';};
+  ctrl.appendChild(caret);
+  ctrl.onclick=(e)=>{e.stopPropagation();if(panel.style.display==='none'){place();panel.style.display='block';}else panel.style.display='none';};
+  panel.onclick=e=>e.stopPropagation();document.addEventListener('click',()=>{panel.style.display='none';});
+  refresh();wrap.appendChild(ctrl);return wrap;
+}
 const EXCLUDE_VERDICT_OPTS=['Clean','Impersonation','Infomail','Malware','Phishing','Spam-Definite','Spam-High','Spam-Likely'];
 const DMARC_OPTS=[['sender_dmarc_policy','Sender DMARC Policy (Recommended)'],['quarantine','Quarantine'],['reject','Reject'],['no_action','No Action']];
 const SPFFAIL_OPTS=[['reject','Reject (Recommended)'],['quarantine','Quarantine'],['no_action','No Action']];
@@ -828,7 +909,7 @@ function openTemplateEditor(t){
   b.appendChild(sec('Geo filter (stored — enforcement follow-up)'));
   b.appendChild(el('<div style="font-size:12px;color:var(--faint);margin-bottom:8px">Quarantine, junk or banner mail from selected countries/regions.</div>'));
   if(!Array.isArray(model.data.geo.countries))model.data.geo.countries=[];
-  const geoField=el('<div class="field"><label>Regions</label></div>');geoField.appendChild(chipGroup(GEO_REGIONS,model.data.geo.countries));b.appendChild(geoField);
+  const geoField=el('<div class="field"><label>Countries</label></div>');geoField.appendChild(geoSelect(model.data.geo.countries));b.appendChild(geoField);
   au('Action',model.data.geo.action,actOpts('quarantine'),v=>model.data.geo.action=v);
   b.appendChild(sec('Advanced'));
   const adv=(label,on,set)=>{const r=el(`<div style="display:flex;align-items:center;gap:14px;padding:8px 0"><div style="flex:1;font-size:13.5px;font-weight:500">${label}</div></div>`);const tg=makeToggle(on);tg.onclick=(()=>{const o=tg.onclick;return()=>{o&&o();set(tg._get());};})();r.appendChild(tg);b.appendChild(r);};
@@ -1119,6 +1200,8 @@ const DEFAULT_BRAND='<svg class="mark" viewBox="0 0 40 40" fill="none"><path d="
 // Apply the current scope's logo + app name to the sidebar as a proper lockup.
 async function applyBranding(){
   const brand=document.querySelector('.brand');if(!brand)return;
+  brand.style.cursor='pointer';
+  brand.onclick=()=>go(STATE.role==='partner'?'p-dashboard':'dashboard');
   try{const r=await api('/settings/config');const z=r.settings.customization;
     if(z.active&&z.logoDataUrl){
       // Full-width logo on its background color, app name beneath — like a real brand lockup.

@@ -173,7 +173,23 @@ export function buildApi() {
       mailboxes: store.usersForTenant(scope).length,
       licenses: cust.licenses,
     } : null;
-    const pendingReleases = scope !== 'all' ? emailStore.releaseRequests.filter((r: any) => r.customerId === scope && r.status === 'pending').length : 0;
+    const pendingReleases = emailStore.releaseRequests.filter((r: any) => (scope === 'all' || r.customerId === scope) && r.status === 'pending').length;
+
+    // partner-wide rollup (aggregate usage + customers by service)
+    let partner: any = null;
+    if (s.role === 'partner_admin' && scope === 'all') {
+      const custs = listCustomers();
+      let domains = 0, mailboxes = 0, licenses = 0;
+      const byService = { 'BreakPhish 365': 0, 'BreakPhish Gateway': 0, 'BreakPhish Unified': 0 };
+      for (const c of custs) {
+        domains += new Set([c.primaryDomain, ...(getConnection(c.id)?.verifiedDomains ?? []), ...getSettings(c.id).managedDomains]).size;
+        mailboxes += store.usersForTenant(c.id).length;
+        licenses += c.licenses;
+        const svc = c.integrationModel === 'gateway' ? 'BreakPhish Gateway' : c.integrationModel === 'unified' ? 'BreakPhish Unified' : 'BreakPhish 365';
+        (byService as any)[svc]++;
+      }
+      partner = { totalCustomers: custs.length, byService, usage: { domains, mailboxes, licenses }, onTrial: 0 };
+    }
     const timeline = Object.entries(byDay).sort(([a], [b]) => a < b ? -1 : 1).slice(-14).map(([day, v]) => ({ day, ...v }));
     const topSenders = Object.entries(threatSenders).sort(([, a], [, b]) => b - a).slice(0, 8).map(([sender, count]) => ({ sender, count }));
     // per-customer rollup (partner only)
@@ -187,7 +203,7 @@ export function buildApi() {
       : [];
     res.json({
       scope, range, processed, threats, quarantined, clean, spam, policy,
-      nonClean, remediated, daysSaved, msCaught, deltas, usage, pendingReleases,
+      nonClean, remediated, daysSaved, msCaught, deltas, usage, pendingReleases, partner,
       cleanRate: processed ? Math.round((clean / processed) * 100) : 0,
       catchRate: processed ? Math.round((quarantined / processed) * 100) : 0,
       verdicts, dispositions, timeline, topSenders, perCustomer, geo: geoList, targetedMailboxes,
