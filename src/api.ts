@@ -21,7 +21,7 @@ import { attachSession, requireAuth, requirePartner, requireCustomerAccess, sess
 import { getSettings, saveSettings } from './settings';
 import { listTeam, saveTeamMember, deleteTeamMember } from './team';
 import { hashPassword } from './auth/localAuth';
-import { audit, listAudit } from './audit';
+import { audit, listAudit, distinctAuditActions } from './audit';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -87,8 +87,23 @@ export function buildApi() {
     const s = sessionOf(req);
     audit({ actorEmail: s?.email, role: s?.teamRole ?? s?.role, action, resource, detail, customerId });
   };
-  api.get('/audit', requirePartner, (req, res) => {
-    res.json({ entries: listAudit({ q: String(req.query.q ?? '') || undefined, limit: 300 }) });
+  api.get('/audit', requireAuth, (req, res) => {
+    const s = sessionOf(req)!;
+    const customerId = s.role === 'partner_admin' ? (String(req.query.customerId ?? '') || undefined) : s.customerId;
+    const range = String(req.query.range ?? 'all');
+    let from = 0; const now = Date.now();
+    if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); from = d.getTime(); }
+    else if (range === '7d') from = now - 7 * 864e5;
+    else if (range === '30d') from = now - 30 * 864e5;
+    const entries = listAudit({
+      q: String(req.query.q ?? '') || undefined,
+      customerId,
+      action: String(req.query.action ?? '') || undefined,
+      resource: String(req.query.resource ?? '') || undefined,
+      from,
+      limit: 400,
+    });
+    res.json({ entries, actions: distinctAuditActions(customerId) });
   });
 
   // ---- Analytics (partner aggregate, or a single customer) ----
@@ -131,9 +146,34 @@ export function buildApi() {
       if (day) { (byDay[day] ??= { total: 0, threats: 0 }).total++; if (isThreat) byDay[day].threats++; }
     }
     const nonClean = processed - clean;
+    const remediated = dispositions['remediated'] ?? 0;
     const geoList = Object.entries(geo).sort(([, a], [, b]) => b - a).slice(0, 10).map(([country, count]) => ({ country, count }));
     const targetedMailboxes = Object.entries(mailboxes).sort(([, a], [, b]) => b - a).slice(0, 10).map(([mailbox, count]) => ({ mailbox, count }));
     const daysSaved = Math.round((nonClean * 20) / 86400); // ~20s saved per non-clean email
+
+    // previous-period counts for trend deltas
+    const windowLen = (from ? to - from : 30 * 864e5);
+    const prevFrom = (from || now - 30 * 864e5) - windowLen, prevTo = from || now - 30 * 864e5;
+    let pProcessed = 0, pClean = 0, pThreats = 0, pRemediated = 0;
+    for (const m of [...emailStore.messages.values()]) {
+      if (scope !== 'all' && m.tenantId !== scope) continue;
+      const t = Date.parse(m.receivedAt || ''); if (!(t >= prevFrom && t < prevTo)) continue;
+      const a = emailStore.analysisFor(m.id); if (!a) continue;
+      pProcessed++; if (a.verdict === 'clean') pClean++;
+      if (THREATS.includes(a.verdict)) pThreats++;
+      if (a.disposition === 'remediated') pRemediated++;
+    }
+    const pct = (cur: number, prev: number) => prev === 0 ? (cur > 0 ? 100 : 0) : Math.round(((cur - prev) / prev) * 100);
+    const deltas = { processed: pct(processed, pProcessed), clean: pct(clean, pClean), nonClean: pct(nonClean, pProcessed - pClean), threats: pct(threats, pThreats), remediated: pct(remediated, pRemediated) };
+
+    // usage + pending releases (single-customer scope)
+    const cust = scope !== 'all' ? getCustomer(scope) : undefined;
+    const usage = cust ? {
+      domains: new Set([cust.primaryDomain, ...(getConnection(scope)?.verifiedDomains ?? []), ...getSettings(scope).managedDomains]).size,
+      mailboxes: store.usersForTenant(scope).length,
+      licenses: cust.licenses,
+    } : null;
+    const pendingReleases = scope !== 'all' ? emailStore.releaseRequests.filter((r: any) => r.customerId === scope && r.status === 'pending').length : 0;
     const timeline = Object.entries(byDay).sort(([a], [b]) => a < b ? -1 : 1).slice(-14).map(([day, v]) => ({ day, ...v }));
     const topSenders = Object.entries(threatSenders).sort(([, a], [, b]) => b - a).slice(0, 8).map(([sender, count]) => ({ sender, count }));
     // per-customer rollup (partner only)
@@ -147,7 +187,7 @@ export function buildApi() {
       : [];
     res.json({
       scope, range, processed, threats, quarantined, clean, spam, policy,
-      nonClean, daysSaved, msCaught,
+      nonClean, remediated, daysSaved, msCaught, deltas, usage, pendingReleases,
       cleanRate: processed ? Math.round((clean / processed) * 100) : 0,
       catchRate: processed ? Math.round((quarantined / processed) * 100) : 0,
       verdicts, dispositions, timeline, topSenders, perCustomer, geo: geoList, targetedMailboxes,

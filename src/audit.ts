@@ -28,11 +28,21 @@ export function audit(e: { actorEmail?: string; role?: string; action: string; r
   }
 }
 
-export function listAudit(opts: { q?: string; customerId?: string; limit?: number } = {}): AuditEntry[] {
+export function listAudit(opts: { q?: string; customerId?: string; action?: string; resource?: string; from?: number; limit?: number } = {}): AuditEntry[] {
   let rows = ring;
   if (opts.customerId) rows = rows.filter(r => r.customerId === opts.customerId);
+  if (opts.action) rows = rows.filter(r => r.action === opts.action);
+  if (opts.resource) { const s = opts.resource.toLowerCase(); rows = rows.filter(r => (r.resource || '').toLowerCase().includes(s)); }
+  if (opts.from) rows = rows.filter(r => Date.parse(r.at) >= opts.from!);
   if (opts.q) { const s = opts.q.toLowerCase(); rows = rows.filter(r => (r.actorEmail + ' ' + r.action + ' ' + r.resource + ' ' + r.detail).toLowerCase().includes(s)); }
   return rows.slice(0, opts.limit ?? 200);
+}
+
+// Distinct action names (for a filter dropdown), optionally scoped to a customer.
+export function distinctAuditActions(customerId?: string): string[] {
+  const set = new Set<string>();
+  for (const r of ring) if (!customerId || r.customerId === customerId) set.add(r.action);
+  return [...set].sort();
 }
 
 export async function hydrateAudit(): Promise<number> {

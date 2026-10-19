@@ -235,7 +235,7 @@ const NAV_PARTNER=[
   ['p-audit','Audit Logs','list'],
   ['settings','Settings','gear'],
 ];
-const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Live Email Tracker','mail'],['quarantine','Quarantine','lock'],['users','Users','users'],['policy','Policy','shield'],['settings','Settings','gear']];
+const NAV_ADMIN=[['dashboard','Dashboard','home'],['tracker','Live Email Tracker','mail'],['quarantine','Quarantine','lock'],['users','Users','users'],['policy','Policy','shield'],['analytics','Analytics','chart'],['audit','Audit Logs','list'],['settings','Settings','gear']];
 function renderNav(){
   const nav=document.getElementById('nav');nav.innerHTML='';
   (STATE.role==='partner'?NAV_PARTNER:NAV_ADMIN).forEach(([id,label,ic])=>{
@@ -325,20 +325,51 @@ VIEWS.customers=async function(){
   return v;
 };
 
+let DASH_RANGE='7d';
 VIEWS.dashboard=async function(){
-  const d=await api('/customers/'+STATE.customerId+'/dashboard');
+  const d=await api('/analytics?scope='+encodeURIComponent(STATE.customerId)+'&range='+DASH_RANGE);
   const v=el('<div></div>');
-  v.appendChild(el(`<div class="ph"><h1>Email Security Hub</h1><p>${STATE._cust.name} · scored by the live pipeline</p></div>`));
-  v.appendChild(el(`<div class="stats">
-    ${stat('Processed',d.processed)}${stat('Clean',d.clean)}${stat('Non-Clean',d.nonClean)}
-    ${stat('Threats',d.threats,'var(--danger)')}${stat('Remediated',d.remediated,'var(--violet)')}</div>`));
+  const head=el(`<div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between"><div><h1>Hello!</h1><p>Welcome to your Email Security Hub · ${STATE._cust.name}</p></div></div>`);
+  // date toggle
+  const seg=el('<div style="display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:3px"></div>');
+  [['7d','Last 7 Days'],['30d','Last 30 Days']].forEach(([val,lbl])=>{const b=el(`<button style="padding:7px 13px;border:none;border-radius:7px;font-size:12.5px;font-weight:600;background:${DASH_RANGE===val?'var(--brand)':'none'};color:${DASH_RANGE===val?'#fff':'var(--muted)'}">${lbl}</button>`);b.onclick=()=>{DASH_RANGE=val;go('dashboard');};seg.appendChild(b);});
+  head.appendChild(seg);v.appendChild(head);
+  // summary cards with trend deltas
+  const trend=(pctv)=>{if(pctv===0)return '';const up=pctv>0;return `<span style="font-size:12px;color:${up?'var(--ok)':'var(--danger)'}">${up?'+':''}${pctv}% ${up?'↗':'↘'}</span>`;};
+  const scard=(label,val,delta,color)=>el(`<div class="card p"><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">${label}</div><div style="font-size:26px;font-weight:700;margin:4px 0;${color?`color:${color}`:''}">${Number(val).toLocaleString()}</div>${delta!=null?trend(delta):''}</div>`);
+  const cards=el('<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px"></div>');
+  cards.appendChild(scard('Processed',d.processed,d.deltas.processed));
+  cards.appendChild(scard('Clean',d.clean,d.deltas.clean,'var(--ok)'));
+  cards.appendChild(scard('Non-Clean',d.nonClean,d.deltas.nonClean,'var(--warn)'));
+  cards.appendChild(scard('Threats',d.threats,d.deltas.threats,'var(--danger)'));
+  cards.appendChild(scard('Remediated',d.remediated,d.deltas.remediated,'var(--violet)'));
+  v.appendChild(cards);
+  // verdict breakdown (non-clean)
   const card=el('<div class="card"><div class="card-h"><h3>Breakdown of non-clean emails by verdict</h3></div></div>');
   const brk=el('<div class="brk"></div>');
-  const entries=Object.entries(d.breakdown).sort((a,b)=>b[1]-a[1]);const max=Math.max(...entries.map(e=>e[1]),1);
+  const entries=Object.entries(d.verdicts).filter(([k])=>k!=='clean').sort((a,b)=>b[1]-a[1]);const max=Math.max(...entries.map(e=>e[1]),1);
   if(!entries.length)brk.appendChild(el('<div style="color:var(--faint);font-size:13px">No non-clean mail scored yet.</div>'));
-  entries.forEach(([vk,ct])=>{const pct=Math.round(ct/d.nonClean*100);
-    brk.appendChild(el(`<div class="r"><div style="font-size:13px">${VERDICT_LABEL[vk]}</div><div class="bar"><span style="width:${Math.max(3,ct/max*100)}%;background:${VERDICT_BAR[vk]}"></span></div><div class="vl">${pct<1?'<1':pct}% (${ct})</div></div>`));});
+  entries.forEach(([vk,ct])=>{const pct=d.nonClean?Math.round(ct/d.nonClean*100):0;
+    brk.appendChild(el(`<div class="r"><div style="font-size:13px">${VERDICT_LABEL[vk]||vk}</div><div class="bar"><span style="width:${Math.max(3,ct/max*100)}%;background:${VERDICT_BAR[vk]||'var(--brand)'}"></span></div><div class="vl">${pct<1?'<1':pct}% (${ct})</div></div>`));});
   card.appendChild(brk);v.appendChild(card);
+  // bottom row: pending release + usage | targeted mailboxes
+  const grid=el('<div style="display:grid;grid-template-columns:360px 1fr;gap:16px;margin-top:16px"></div>');
+  const left=el('<div></div>');
+  const pr=el(`<div class="card p" style="margin-bottom:16px"><div style="display:flex;align-items:center"><h3 style="flex:1;font-size:14px">Pending Release</h3><a href="#" style="font-size:12px;color:var(--brand)" onclick="go('quarantine');return false">Review →</a></div><div style="font-size:12px;color:var(--faint);margin-top:8px">Requests</div><div style="font-size:30px;font-weight:700">${d.pendingReleases}</div></div>`);
+  left.appendChild(pr);
+  const u=d.usage||{domains:0,mailboxes:0,licenses:0};
+  const usage=el(`<div class="card p"><h3 style="font-size:14px;margin-bottom:12px">Usage</h3><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+    <div><div style="font-size:11px;color:var(--faint)">Domains</div><div style="font-size:22px;font-weight:700">${u.domains}</div></div>
+    <div><div style="font-size:11px;color:var(--faint)">Mailboxes</div><div style="font-size:22px;font-weight:700">${u.mailboxes}</div></div>
+    <div><div style="font-size:11px;color:var(--faint)">Licenses</div><div style="font-size:22px;font-weight:700">${u.licenses}</div></div></div></div>`);
+  left.appendChild(usage);grid.appendChild(left);
+  const tm=el('<div class="card"><div class="card-h"><h3>Targeted Mailboxes</h3></div></div>');
+  const tmb=el('<div style="padding:6px 18px 14px"></div>');
+  const tmMax=Math.max(1,...d.targetedMailboxes.map(t=>t.count));
+  d.targetedMailboxes.forEach(t=>tmb.appendChild(el(`<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span style="color:var(--brand);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.mailbox}</span><span class="mono" style="color:var(--muted)">${t.count.toLocaleString()}</span></div><div style="height:7px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.round(t.count/tmMax*100)}%;background:var(--warn)"></div></div></div>`)));
+  if(!d.targetedMailboxes.length)tmb.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No data yet.</div>'));
+  tm.appendChild(tmb);grid.appendChild(tm);
+  v.appendChild(grid);
   return v;
 };
 function stat(l,v,color){return `<div class="s"><div class="l">${l}</div><div class="v" ${color?`style="color:${color}"`:''}>${Number(v).toLocaleString()}</div></div>`;}
@@ -506,26 +537,42 @@ VIEWS.users=async function(){
   card.appendChild(tbl);v.appendChild(card);
   return v;
 };
-/* ---- Audit Logs ---- */
-VIEWS['p-audit']=async function(){
+/* ---- Audit Logs (shared partner + customer) ---- */
+VIEWS['p-audit']=auditView; VIEWS['audit']=auditView;
+const AUDIT_RANGES=[['all','All time'],['today','Today'],['7d','Last 7 days'],['30d','Last 30 days']];
+async function auditView(){
   const v=el('<div></div>');
-  v.appendChild(el('<div class="ph"><h1>Audit Logs</h1><p>Every action taken in the console</p></div>'));
+  v.appendChild(el('<div class="ph"><h1>Audit Logs</h1><p>'+(STATE.role==='partner'?'Every action taken across the console':STATE._cust.name+' · activity on your account')+'</p></div>'));
   const card=el('<div class="card"></div>');
-  const filt=el('<div class="filters"><input id="asearch" placeholder="Search actor, action, resource…" style="flex:1;min-width:200px"></div>');
+  const st={q:'',action:'',resource:'',range:'all'};
+  const filt=el('<div class="filters">'+
+    '<input id="aq" placeholder="Search actor…" style="min-width:160px">'+
+    '<select id="aaction"><option value="">All actions</option></select>'+
+    '<input id="ares" placeholder="Resource contains…" style="min-width:160px">'+
+    '<select id="arange">'+AUDIT_RANGES.map(([v2,l])=>`<option value="${v2}">${l}</option>`).join('')+'</select>'+
+    '</div>');
   card.appendChild(filt);
   const tbl=el('<table><thead><tr><th>Timestamp</th><th>Actor</th><th>Role</th><th>Action</th><th>Resource</th><th>Detail</th></tr></thead><tbody></tbody></table>');
   const tb=tbl.querySelector('tbody');
-  async function load(q){
+  const actionSel=filt.querySelector('#aaction');
+  async function load(){
     tb.innerHTML='<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--faint)">Loading…</td></tr>';
-    const {entries}=await api('/audit'+(q?'?q='+encodeURIComponent(q):''));
+    const qs=new URLSearchParams({q:st.q,action:st.action,resource:st.resource,range:st.range});
+    const {entries,actions}=await api('/audit?'+qs.toString());
+    // populate action dropdown once
+    if(actionSel.options.length<=1&&actions){actions.forEach(a=>{const o=document.createElement('option');o.value=a;o.textContent=a;actionSel.appendChild(o);});}
     tb.innerHTML='';
     if(!entries.length){tb.appendChild(el('<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--faint)">No audit entries.</td></tr>'));return;}
     entries.forEach(e=>tb.appendChild(el(`<tr><td class="mono" style="color:var(--muted);white-space:nowrap">${new Date(e.at).toLocaleString()}</td><td>${e.actorEmail}</td><td><span class="pill p-muted">${e.role||'—'}</span></td><td><span class="mono" style="font-size:12px">${e.action}</span></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.resource||'—'}</td><td style="color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.detail||'—'}</td></tr>`)));
   }
-  let adeb;filt.querySelector('#asearch').oninput=e=>{clearTimeout(adeb);adeb=setTimeout(()=>load(e.target.value.trim()),300);};
-  card.appendChild(tbl);v.appendChild(card);await load('');
+  let adeb;const deb=fn=>{clearTimeout(adeb);adeb=setTimeout(fn,300);};
+  filt.querySelector('#aq').oninput=e=>{st.q=e.target.value.trim();deb(load);};
+  filt.querySelector('#ares').oninput=e=>{st.resource=e.target.value.trim();deb(load);};
+  actionSel.onchange=e=>{st.action=e.target.value;load();};
+  filt.querySelector('#arange').onchange=e=>{st.range=e.target.value;load();};
+  card.appendChild(tbl);v.appendChild(card);await load();
   return v;
-};
+}
 
 /* ---- Analytics ---- */
 VIEWS['p-analytics']=analyticsView; VIEWS['analytics']=analyticsView;
