@@ -48,7 +48,10 @@ nav.menu a.active::before{content:"";position:absolute;left:-12px;top:8px;bottom
 .btn:hover{border-color:var(--muted)}.btn.primary{background:var(--brand);color:#fff;border-color:transparent}.btn.primary:hover{background:#4338ca}
 .btn.sm{padding:6px 11px;font-size:12px}.btn.ok{background:var(--ok-bg);color:var(--ok);border-color:transparent}
 .btn.teal{background:var(--teal);color:#fff;border-color:transparent}
-.view{padding:24px 26px 60px;max-width:1240px;width:100%}
+.view{padding:24px 26px 60px;max-width:1680px;width:100%}
+.card table{width:100%}
+.tablewrap{overflow-x:auto}
+@media(max-width:1100px){.view{padding:18px 14px 60px}.filters{flex-wrap:wrap}}
 .ph{margin-bottom:20px}.ph h1{font-size:22px}.ph p{color:var(--muted);font-size:13px;margin-top:3px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px}.card.p{padding:18px}
 .card-h{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line2)}.card-h h3{font-size:14.5px}
@@ -411,16 +414,17 @@ async function trackerNode(){
   filt.querySelector('#fstat').onchange=e=>{STATE.filterStatus=e.target.value;STATE.page=0;refresh();};
   filt.querySelector('#fverd').onchange=e=>{STATE.filterVerdict=e.target.value;STATE.page=0;refresh();};
   card.appendChild(filt);
-  const tbl=el(`<table><thead><tr><th>Date &amp; Time</th><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th>Status</th><th>Service</th><th>Source</th><th></th></tr></thead><tbody></tbody></table>`);
+  const twrap=el('<div class="tablewrap"></div>');
+  const tbl=el(`<table style="min-width:900px"><thead><tr><th style="width:120px">Date</th><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th>Status</th><th>Service</th><th>Source</th><th></th></tr></thead><tbody></tbody></table>`);
   const tb=tbl.querySelector('tbody');
   if(!data.rows.length)tb.appendChild(el('<tr><td colspan="9" style="padding:36px;text-align:center;color:var(--faint)">No messages match.</td></tr>'));
   data.rows.forEach(m=>{
     const dt=new Date(m.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     const srcLabel=m.source==='internal'?'Internal':'External';
-    const row=el(`<tr><td class="mono" style="color:var(--muted);white-space:nowrap">${dt}</td>
-      <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.to}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
+    const row=el(`<tr><td class="mono" style="color:var(--faint);white-space:nowrap;font-size:11px">${dt}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td>
+      <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.to}</td>
+      <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
       <td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td>
       <td><span class="pill ${DISP_CLS[m.status]}">${DISP_LABEL[m.status]}</span></td>
       <td style="color:var(--muted)"><span class="pill p-muted" style="font-weight:500">${m.service||'—'}</span></td>
@@ -429,7 +433,7 @@ async function trackerNode(){
     const vb=el('<button class="btn sm">View</button>');vb.onclick=()=>openMessage(m.id);row.children[8].appendChild(vb);
     tb.appendChild(row);
   });
-  card.appendChild(tbl);
+  twrap.appendChild(tbl);card.appendChild(twrap);
   const pager=el(`<div class="pager"><span>${data.total.toLocaleString()} messages</span><div style="flex:1"></div>
     <button id="pp" ${STATE.page===0?'disabled':''}>‹</button><span class="mono">${STATE.page+1}/${data.pages}</span><button id="pn" ${STATE.page>=data.pages-1?'disabled':''}>›</button></div>`);
   pager.querySelector('#pp').onclick=()=>{STATE.page--;refresh();};pager.querySelector('#pn').onclick=()=>{STATE.page++;refresh();};
@@ -946,7 +950,14 @@ function openTemplateEditor(t){
   const defRow=el('<div style="display:flex;align-items:center;gap:14px;padding:10px 0"><div style="flex:1;font-size:13.5px;font-weight:500">Set as default (applied to new mail for this scope)</div></div>');const dtg=makeToggle(model.isDefault);dtg.onclick=(()=>{const o=dtg.onclick;return()=>{o&&o();model.isDefault=dtg._get();};})();defRow.appendChild(dtg);b.appendChild(defRow);
   const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)"></div>');
   foot.appendChild(el('<button class="btn" onclick="closeModal()">Cancel</button>'));
-  if(editable){const sv=el('<button class="btn primary">Submit</button>');sv.onclick=async()=>{if(!model.name){toast('Name required');return;}try{await api('/policy/templates'+(isNew?'':'/'+t.id),{method:isNew?'POST':'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(model)});closeModal();toast('Template saved');POLTAB='Policy Templates';go(STATE.role==='partner'?'p-policy':'policy');}catch(e){toast('Save failed: '+e.message);}};foot.appendChild(sv);}
+  const saveTpl=async(asNew)=>{if(!model.name){toast('Name required');return;}
+    const payload={...model};if(asNew){payload.name=model.name+' (copy)';}
+    try{await api('/policy/templates'+(asNew||isNew?'':'/'+t.id),{method:(asNew||isNew)?'POST':'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});closeModal();toast('Template saved');POLTAB='Policy Templates';go(STATE.role==='partner'?'p-policy':'policy');}catch(e){toast('Save failed: '+e.message);}};
+  if(editable){const sv=el('<button class="btn primary">Submit</button>');sv.onclick=()=>saveTpl(false);foot.appendChild(sv);}
+  else if(!isNew && STATE.role!=='partner'){
+    // customer viewing a read-only global template → let them clone it into their own
+    const sv=el('<button class="btn primary">Save as my template</button>');sv.onclick=()=>saveTpl(true);foot.appendChild(sv);
+  }
   b.appendChild(foot);
 }
 
