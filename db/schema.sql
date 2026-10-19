@@ -274,3 +274,6 @@ create table if not exists ai_usage (
 -- editable price (per 1M tokens) for cost estimation
 alter table ai_config add column if not exists input_price  numeric not null default 0;
 alter table ai_config add column if not exists output_price numeric not null default 0;
+
+-- flag for messages delivered via a manual admin release
+alter table analyses add column if not exists released_manually boolean not null default false;

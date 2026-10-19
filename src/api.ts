@@ -609,7 +609,7 @@ export function buildApi() {
       const id = req.params.id, mid = req.params.mid;
       const m = emailStore.messages.get(mid); const a = emailStore.analysisFor(mid);
       if (!m || !a) return res.status(404).json({ error: 'not found' });
-      a.disposition = 'deliver'; a.remediated = false;
+      a.disposition = 'deliver'; a.remediated = false; a.releasedManually = true;
       emailStore.saveAnalysis(a); await persistScored(m, a);
       // Pin as released so a webhook firing after the move-to-inbox won't re-quarantine it.
       emailStore.markReleased(m.internetMessageId);

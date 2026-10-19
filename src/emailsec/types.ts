@@ -70,6 +70,7 @@ export interface Signal {
 }
 
 export interface Analysis {
+  releasedManually?: boolean;
   messageId: string;
   tenantId: string;
   verdict: Verdict;

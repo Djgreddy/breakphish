@@ -28,6 +28,9 @@ export function liveTracker(tenantId: string) {
   return msgs
     .map(m => {
       const a = emailStore.analysisFor(m.id)!;
+      // A message delivered because an admin manually released it gets a distinct
+      // status so it's visually separable from auto-delivered clean mail.
+      const released = a.disposition === 'deliver' && (a.releasedManually || emailStore.isReleased(m.internetMessageId));
       return {
         id: m.id,
         at: m.receivedAt,
@@ -35,7 +38,7 @@ export function liveTracker(tenantId: string) {
         to: m.to,
         subject: m.subject,
         verdict: a.verdict,
-        status: a.disposition,
+        status: released ? 'released' : a.disposition,
         source: m.source,
         direction: m.direction,
       };

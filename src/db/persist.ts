@@ -103,12 +103,12 @@ export async function loadMessages(): Promise<any[]> {
 }
 export async function upsertAnalysisRow(a: any): Promise<void> {
   await q(
-    `insert into analyses (message_id,tenant_id,verdict,confidence,disposition,remediated,signals)
-     values ($1,$2,$3,$4,$5,$6,$7)
+    `insert into analyses (message_id,tenant_id,verdict,confidence,disposition,remediated,signals,released_manually)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)
      on conflict (message_id) do update set
        verdict=excluded.verdict, confidence=excluded.confidence, disposition=excluded.disposition,
-       remediated=excluded.remediated, signals=excluded.signals`,
-    [a.messageId, a.tenantId, a.verdict, a.confidence, a.disposition, a.remediated, JSON.stringify(a.signals ?? [])],
+       remediated=excluded.remediated, signals=excluded.signals, released_manually=excluded.released_manually`,
+    [a.messageId, a.tenantId, a.verdict, a.confidence, a.disposition, a.remediated, JSON.stringify(a.signals ?? []), a.releasedManually ?? false],
   );
 }
 export async function loadAnalyses(): Promise<any[]> {

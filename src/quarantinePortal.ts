@@ -134,7 +134,7 @@ export function buildPortalApp() {
     const { conn, user } = await mailboxFor(v.customerId, v.email);
     try {
       if (doo === 'deliver') {
-        a.disposition = 'deliver'; a.remediated = false; emailStore.saveAnalysis(a); await persistScored(m, a);
+        a.disposition = 'deliver'; a.remediated = false; a.releasedManually = true; emailStore.saveAnalysis(a); await persistScored(m, a);
         emailStore.markReleased(m.internetMessageId);
         if (conn?.entraTenantId && user) await makeMailActions().moveToInbox(conn.entraTenantId, user.externalId, { graphId: id, internetMessageId: m.internetMessageId });
         audit({ actorEmail: v.email, role: 'end_user', action: 'mail.release', resource: m.subject, detail: 'via quarantine portal', customerId: v.customerId });

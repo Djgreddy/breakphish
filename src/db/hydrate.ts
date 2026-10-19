@@ -42,7 +42,7 @@ export async function hydrateEmail(): Promise<{ messages: number; analyses: numb
   for (const r of analyses) {
     emailStore.saveAnalysis({
       messageId: r.message_id, tenantId: r.tenant_id, verdict: r.verdict, confidence: r.confidence,
-      disposition: r.disposition, remediated: r.remediated, signals: r.signals ?? [],
+      disposition: r.disposition, remediated: r.remediated, releasedManually: r.released_manually ?? false, signals: r.signals ?? [],
     });
   }
   for (const imid of await loadReleased()) emailStore.markReleased(imid);

@@ -134,8 +134,8 @@ const COLORS=['#4f46e5','#0ea5a3','#c9820a','#7c3aed','#2563eb','#db2777'];
 
 const VERDICT_CLS={clean:'p-ok',spam:'p-warn',spam_likely:'p-warn',phishing:'p-danger',malware:'p-danger',impersonation:'p-danger',policy_infomail:'p-info',policy_geo:'p-info'};
 const VERDICT_BAR={clean:'var(--ok)',spam:'var(--warn)',spam_likely:'var(--warn)',phishing:'var(--danger)',malware:'var(--danger)',impersonation:'var(--danger)',policy_infomail:'var(--info)',policy_geo:'var(--info)'};
-const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p-violet'};
-const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated'};
+const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p-violet',released:'p-info'};
+const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated',released:'Released'};
 const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
 
 const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',filterRange:'all',filterDomain:'',dateFrom:'',dateTo:'',page:0,session:null};
@@ -395,7 +395,8 @@ async function trackerNode(){
   const RANGE_OPTS=[['all','All time'],['today','Today'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']];
   const domOpts=(STATE._domains||[]).map(dn=>`<option value="${dn}" ${STATE.filterDomain===dn?'selected':''}>${dn}</option>`).join('');
   const filt=el(`<div class="filters">
-    <input id="fq" placeholder="Search sender, recipient, subject or keywords…" value="${STATE.filterText||''}" style="flex:1;min-width:240px">
+    <input id="fq" placeholder="Search sender, recipient, subject or keywords… (press Enter)" value="${STATE.filterText||''}" style="flex:1;min-width:220px">
+    <button id="fsearch" class="btn sm">Search</button>
     <select id="fdom"><option value="">All domains</option>${domOpts}</select>
     <select id="frange">${RANGE_OPTS.map(([v2,l])=>`<option value="${v2}" ${STATE.filterRange===v2?'selected':''}>${l}</option>`).join('')}</select>
     <input id="fcfrom" type="date" style="${STATE.filterRange==='custom'?'':'display:none'}">
@@ -404,8 +405,9 @@ async function trackerNode(){
     <select id="fstat"><option value="">Any status</option>${Object.entries(DISP_LABEL).map(([k,l])=>`<option value="${k}" ${STATE.filterStatus===k?'selected':''}>${l}</option>`).join('')}</select>
     <select id="fverd"><option value="">All verdicts</option>${Object.entries(VERDICT_LABEL).map(([k,l])=>`<option value="${k}" ${STATE.filterVerdict===k?'selected':''}>${l}</option>`).join('')}</select>
   </div>`);
-  let deb;
-  filt.querySelector('#fq').oninput=e=>{clearTimeout(deb);deb=setTimeout(()=>{STATE.filterText=e.target.value.trim();STATE.page=0;refresh();},300);};
+  const doSearch=()=>{STATE.filterText=filt.querySelector('#fq').value.trim();STATE.page=0;refresh();};
+  filt.querySelector('#fq').onkeydown=e=>{if(e.key==='Enter')doSearch();};
+  filt.querySelector('#fsearch').onclick=doSearch;
   filt.querySelector('#fdom').onchange=e=>{STATE.filterDomain=e.target.value;STATE.page=0;refresh();};
   filt.querySelector('#frange').onchange=e=>{STATE.filterRange=e.target.value;STATE.page=0;refresh();};
   filt.querySelector('#fcfrom').onchange=e=>{STATE.dateFrom=e.target.value;STATE.filterRange='custom';STATE.page=0;refresh();};
