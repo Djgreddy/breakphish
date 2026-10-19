@@ -16,6 +16,7 @@ import { hydrateDirectory, hydrateEmail } from './db/hydrate';
 import { hydrateSettings } from './settings';
 import { hydratePolicy } from './policy';
 import { hydrateTeam } from './team';
+import { hydrateAiConfig } from './aiConfig';
 import { hydrateAudit } from './audit';
 import { buildWebhookApp } from './webhooks';
 import { buildPortalApp } from './quarantinePortal';
@@ -73,6 +74,7 @@ async function main() {
       const subN = await hydrateSubscriptions();
       await hydrateTeam();
       await hydrateAudit();
+      await hydrateAiConfig();
       console.log(`[db] hydrated ${c} customers, ${n} connections, ${dir.users} users, ${dir.groups} groups, ${em.messages} messages, ${st} settings, ${pol.templates} policy templates, ${subN} subscriptions from Postgres`);
     } catch (e) {
       console.error('[db] migration/hydrate failed — check DATABASE_URL:', (e as Error).message);

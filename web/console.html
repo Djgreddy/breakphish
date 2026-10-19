@@ -1113,9 +1113,9 @@ VIEWS.settings=async function(){
   const r=await api('/settings/config');SET=r.settings;SETSCOPE=r.scope;
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Settings</h1><p>${isPartner?'Partner defaults · applied to new customers':STATE._cust.name+' · customer settings'}</p></div>`));
-  const tabs=(isPartner?['Server']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']).concat(isPartner?[]:['Domains']);
+  const tabs=(isPartner?['Server','AI Provider']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']).concat(isPartner?[]:['Domains']);
   if(!SETTAB||!tabs.includes(SETTAB))SETTAB=tabs[0];
-  const RENDER={Server:settingsServer,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners,Domains:settingsDomains};
+  const RENDER={Server:settingsServer,'AI Provider':settingsAI,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners,Domains:settingsDomains};
   const wrap=el('<div style="display:flex;gap:20px;align-items:flex-start"></div>');
   const sideNav=el('<div class="card" style="width:220px;flex:none;padding:8px"></div>');
   const body=el('<div style="flex:1;min-width:0"></div>');
@@ -1148,6 +1148,52 @@ async function settingsServer(){
   vb.appendChild(btn);vb.appendChild(result);vc.appendChild(vb);g.appendChild(vc);
   return g;
 }
+async function settingsAI(){
+  const cfg=await api('/ai/config');
+  const m={provider:cfg.provider,endpoint:cfg.endpoint,model:cfg.model,azureDeployment:cfg.azureDeployment,azureApiVersion:cfg.azureApiVersion,apiKey:''};
+  const c=el('<div class="card p" style="max-width:680px"></div>');
+  // status
+  const statusPill=cfg.active?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span>':'<span class="pill p-muted">Not configured</span>';
+  c.appendChild(el(`<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h3 style="font-size:15px;flex:1">Behavioral AI classifier</h3>${statusPill}</div>`));
+  c.appendChild(el('<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px">Runs on the ambiguous middle of inbound external mail to catch payload-less BEC, credential phishing, and impersonation. Partner-wide. Static detection always runs regardless.</div>'));
+  if(cfg.locked)c.appendChild(el('<div class="card p" style="background:var(--warn-bg);border-left:3px solid var(--warn);margin-bottom:14px;font-size:12.5px">Managed via environment variables (<span class="mono">LLM_PROVIDER</span>). The settings below are read-only. Remove the env vars to manage it here.</div>'));
+  const body=el('<div></div>');
+  const PROVIDERS=[['none','None (static only)'],['azure','Azure OpenAI'],['openai','OpenAI'],['anthropic','Anthropic']];
+  body.appendChild(sField('Provider',pairSelect(m.provider,PROVIDERS,v=>{m.provider=v;draw();})));
+  const fields=el('<div></div>');body.appendChild(fields);
+  function draw(){
+    fields.innerHTML='';
+    if(m.provider==='none')return;
+    // API key (write-only)
+    fields.appendChild(sField('API key',(()=>{const i=el('<input type="password" autocomplete="off" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;font-family:inherit">');i.placeholder=cfg.hasKey?'•••••••• (set — leave blank to keep)':'paste your API key';i.oninput=()=>m.apiKey=i.value;return i;})()));
+    if(m.provider==='azure'){
+      fields.appendChild(sField('Azure endpoint',sInput(m.endpoint,v=>m.endpoint=v,'https://<resource>.openai.azure.com')));
+      fields.appendChild(sField('Deployment name',sInput(m.azureDeployment,v=>m.azureDeployment=v,'e.g. gpt-4o-mini')));
+      fields.appendChild(sField('API version',sInput(m.azureApiVersion,v=>m.azureApiVersion=v,'2024-06-01')));
+    } else {
+      fields.appendChild(sField('Model',sInput(m.model,v=>m.model=v,m.provider==='anthropic'?'claude-3-5-haiku-latest':'gpt-4o-mini')));
+    }
+  }
+  draw();c.appendChild(body);
+  // actions
+  const bar=el('<div style="display:flex;gap:10px;align-items:center;margin-top:18px"></div>');
+  const save=el('<button class="btn primary">Save</button>');
+  save.onclick=async()=>{if(cfg.locked){toast('Managed via environment');return;}save.textContent='Saving…';save.disabled=true;
+    try{await api('/ai/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(m)});toast('AI provider saved');go('settings');}
+    catch(e){toast('Save failed: '+e.message);save.textContent='Save';save.disabled=false;}};
+  const test=el('<button class="btn">⚡ Test connection</button>');
+  const testOut=el('<div style="font-size:12.5px;margin-left:4px"></div>');
+  test.onclick=async()=>{test.textContent='Testing…';test.disabled=true;testOut.textContent='';
+    try{const r=await api('/ai/test',{method:'POST'});
+      if(r.ok)testOut.innerHTML=`<span class="pill p-ok">OK</span> model classified the sample as <b>${r.result.verdict}</b> (${Math.round(r.result.confidence*100)}%)`;
+      else testOut.innerHTML=`<span class="pill p-danger">Failed</span> <span style="color:var(--muted)">${r.error}</span>`;
+    }catch(e){testOut.innerHTML='<span class="pill p-danger">Failed</span> '+e.message;}
+    test.textContent='⚡ Test connection';test.disabled=false;};
+  if(!cfg.locked)bar.appendChild(save);bar.appendChild(test);bar.appendChild(testOut);
+  c.appendChild(bar);
+  return c;
+}
+
 async function settingsGeneral(){
   const c=el('<div class="card p" style="max-width:640px"></div>');
   c.appendChild(sField('Company name',sInput(SET.general.companyName,v=>SET.general.companyName=v)));

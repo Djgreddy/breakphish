@@ -250,3 +250,15 @@ alter table team_members add column if not exists totp_enabled  boolean not null
 
 -- audit detail column
 alter table audit_log add column if not exists detail text;
+
+-- partner-wide AI provider config (single row; api key stored encrypted)
+create table if not exists ai_config (
+  id                text primary key default 'partner',
+  provider          text not null default 'none',
+  api_key_enc       text,
+  endpoint          text,
+  model             text,
+  azure_deployment  text,
+  azure_api_version text,
+  updated_at        timestamptz not null default now()
+);

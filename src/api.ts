@@ -24,6 +24,8 @@ import { hashPassword } from './auth/localAuth';
 import { audit, listAudit, distinctAuditActions } from './audit';
 import { portalLink, digestHtml, signPortalToken } from './quarantinePortal';
 import { appToken } from './directory/graphProvider';
+import { publicAiConfig, saveAiConfig } from './aiConfig';
+import { testLlm } from './emailsec/llm';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -211,6 +213,21 @@ export function buildApi() {
       verdicts, dispositions, timeline, topSenders, perCustomer, geo: geoList, targetedMailboxes,
       generatedAt: new Date().toISOString(),
     });
+  });
+
+  // ---- AI provider (partner-wide) ----
+  api.get('/ai/config', requirePartner, (_req, res) => res.json(publicAiConfig()));
+  api.put('/ai/config', requirePartner, requireTeamAdmin, async (req, res) => {
+    try {
+      const { provider, apiKey, endpoint, model, azureDeployment, azureApiVersion } = req.body ?? {};
+      await saveAiConfig({ provider, apiKey, endpoint, model, azureDeployment, azureApiVersion });
+      logReq(req, 'ai.config.update', provider);
+      res.json(publicAiConfig());
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  api.post('/ai/test', requirePartner, async (_req, res) => {
+    const r = await testLlm();
+    res.json(r);
   });
 
   // ---- Team members (partner staff) ----

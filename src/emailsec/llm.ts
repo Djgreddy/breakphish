@@ -3,7 +3,7 @@
 // signatures miss. Supports Azure OpenAI, OpenAI, and Anthropic via config; when
 // provider is 'none' it is disabled and the pipeline stays fully static.
 
-import { config } from '../config';
+import { getLlmConfig } from '../aiConfig';
 import type { Message } from './types';
 
 export interface LlmResult {
@@ -13,7 +13,8 @@ export interface LlmResult {
 }
 
 export function llmEnabled(): boolean {
-  return config.llm.provider !== 'none' && !!config.llm.apiKey;
+  const c = getLlmConfig();
+  return c.provider !== 'none' && !!c.apiKey;
 }
 
 const SYSTEM = `You are an email security analyst. Judge an email's INTENT, not just keywords.
@@ -41,38 +42,60 @@ function parse(text: string): LlmResult | null {
 }
 
 async function callAzure(m: Message): Promise<string> {
-  const url = `${config.llm.endpoint.replace(/\/$/, '')}/openai/deployments/${config.llm.azureDeployment}/chat/completions?api-version=${config.llm.azureApiVersion}`;
+  const c = getLlmConfig();
+  const url = `${c.endpoint.replace(/\/$/, '')}/openai/deployments/${c.azureDeployment}/chat/completions?api-version=${c.azureApiVersion}`;
   const r = await fetch(url, {
-    method: 'POST', headers: { 'api-key': config.llm.apiKey, 'content-type': 'application/json' },
+    method: 'POST', headers: { 'api-key': c.apiKey, 'content-type': 'application/json' },
     body: JSON.stringify({ messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: userPrompt(m) }], temperature: 0, max_tokens: 120, response_format: { type: 'json_object' } }),
   });
   if (!r.ok) throw new Error(`azure ${r.status}: ${await r.text()}`);
   return (await r.json()).choices?.[0]?.message?.content ?? '';
 }
 async function callOpenAI(m: Message): Promise<string> {
+  const c = getLlmConfig();
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST', headers: { authorization: `Bearer ${config.llm.apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ model: config.llm.model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: userPrompt(m) }], temperature: 0, max_tokens: 120, response_format: { type: 'json_object' } }),
+    method: 'POST', headers: { authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ model: c.model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: userPrompt(m) }], temperature: 0, max_tokens: 120, response_format: { type: 'json_object' } }),
   });
   if (!r.ok) throw new Error(`openai ${r.status}: ${await r.text()}`);
   return (await r.json()).choices?.[0]?.message?.content ?? '';
 }
 async function callAnthropic(m: Message): Promise<string> {
+  const c = getLlmConfig();
   const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST', headers: { 'x-api-key': config.llm.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: config.llm.model, max_tokens: 120, system: SYSTEM, messages: [{ role: 'user', content: userPrompt(m) }] }),
+    method: 'POST', headers: { 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: c.model, max_tokens: 120, system: SYSTEM, messages: [{ role: 'user', content: userPrompt(m) }] }),
   });
   if (!r.ok) throw new Error(`anthropic ${r.status}: ${await r.text()}`);
   const j: any = await r.json();
   return (j.content ?? []).map((c: any) => c.text ?? '').join('');
 }
 
+// For the "Test connection" button — runs one classification on a sample BEC email.
+export async function testLlm(): Promise<{ ok: boolean; result?: LlmResult; error?: string }> {
+  if (!llmEnabled()) return { ok: false, error: 'No AI provider configured (set a provider and API key).' };
+  const sample: Message = {
+    id: 'test', internetMessageId: '<test>', tenantId: 'test', direction: 'inbound', source: 'external',
+    fromAddress: 'ceo@example-corp.com', fromDisplay: 'Company CEO', to: 'finance@you.com',
+    subject: 'Urgent wire request', bodyText: 'Are you at your desk? I need you to process an urgent wire transfer to a new vendor before end of day. Keep this confidential for now.',
+    receivedAt: new Date().toISOString(), auth: { spf: 'pass', dkim: 'pass', dmarc: 'pass' }, urls: [], attachments: [],
+  } as any;
+  try {
+    const prov = getLlmConfig().provider;
+    const text = prov === 'azure' ? await callAzure(sample) : prov === 'anthropic' ? await callAnthropic(sample) : await callOpenAI(sample);
+    const r = parse(text);
+    if (!r) return { ok: false, error: 'Provider responded but the output could not be parsed.' };
+    return { ok: true, result: r };
+  } catch (e) { return { ok: false, error: (e as Error).message }; }
+}
+
 // Returns null if disabled or on any error (fail-open to the static verdict).
 export async function classifyIntent(m: Message): Promise<LlmResult | null> {
   if (!llmEnabled()) return null;
   try {
-    const text = config.llm.provider === 'azure' ? await callAzure(m)
-      : config.llm.provider === 'anthropic' ? await callAnthropic(m)
+    const prov = getLlmConfig().provider;
+    const text = prov === 'azure' ? await callAzure(m)
+      : prov === 'anthropic' ? await callAnthropic(m)
       : await callOpenAI(m);
     return parse(text);
   } catch (e) {
