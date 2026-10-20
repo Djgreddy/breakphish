@@ -9,7 +9,8 @@ import { runDetectors } from './detectors';
 import { classifyIntent, llmEnabled } from './llm';
 import { recordScored } from '../aiUsage';
 import { makeClassifier } from './classifier';
-import { dispositionFor } from '../policy';
+import { dispositionFor, resolveTemplate } from '../policy';
+import { getSettings } from '../settings';
 import { emailStore } from './store';
 import { persistScored } from '../db/hydrate';
 
@@ -57,6 +58,15 @@ async function contentSignals(m: Message): Promise<Signal[]> {
   return out;
 }
 
+// Spam filtering sensitivity (from the active policy template) scales the spam
+// score: High flags more, Low flags less. Medium is neutral.
+function adjustSpamSensitivity(scores: Record<Category, number>, tenantId: string): Record<Category, number> {
+  const s = resolveTemplate(tenantId).advanced?.spamSensitivity ?? 'Medium';
+  const mult = s === 'High' ? 1.35 : s === 'Low' ? 0.7 : 1;
+  if (mult !== 1) scores.spam = Math.min(100, Math.round(scores.spam * mult));
+  return scores;
+}
+
 // The "ambiguous middle": not confidently clean, not already a hard threat —
 // exactly where static signatures miss payload-less BEC. These get the LLM.
 function isAmbiguous(verdict: Verdict, confidence: number): boolean {
@@ -70,17 +80,19 @@ export async function analyze(message: Message): Promise<Analysis> {
   if (message.direction === 'inbound' && message.source === 'external') recordScored();
 
   let signals = [...runStaticScorers(message), ...runDetectors(message), ...await contentSignals(message)];
-  let scores = aggregate(signals);
+  let scores = adjustSpamSensitivity(aggregate(signals), message.tenantId);
   let { verdict, confidence } = decideVerdict(scores);
 
   // Tier 2 — behavioral AI only on the ambiguous middle, and only for inbound
   // external mail (where BEC/phishing lives). Fail-open to the static verdict.
-  if (llmEnabled() && message.direction === 'inbound' && message.source === 'external' && isAmbiguous(verdict, confidence)) {
+  // A customer can opt out of AI content analysis for privacy.
+  const aiAllowed = getSettings(message.tenantId).aiAnalysisEnabled !== false;
+  if (aiAllowed && llmEnabled() && message.direction === 'inbound' && message.source === 'external' && isAmbiguous(verdict, confidence)) {
     const r = await classifyIntent(message);
     if (r && r.confidence >= 0.6 && r.verdict !== 'clean') {
       const cat = r.verdict === 'bec' ? 'impersonation' : r.verdict === 'spam' ? 'spam' : r.verdict;
       signals = [...signals, { code: 'ai_intent', detail: `AI: ${r.verdict} — ${r.reason}`, category: cat as any, weight: Math.round(r.confidence * 55) }];
-      scores = aggregate(signals);
+      scores = adjustSpamSensitivity(aggregate(signals), message.tenantId);
       ({ verdict, confidence } = decideVerdict(scores));
     } else if (r) {
       signals = [...signals, { code: 'ai_intent', detail: `AI: clean — ${r.reason}`, category: 'spam', weight: 0 }];

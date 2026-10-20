@@ -231,6 +231,8 @@ export function buildApi() {
     res.json(r);
   });
   api.get('/ai/usage', requirePartner, (_req, res) => res.json(getUsage()));
+  // Minimal AI status for customers (just whether the AI tier is active — no config).
+  api.get('/settings/ai-status', requireAuth, (_req, res) => res.json({ aiActive: publicAiConfig().active }));
 
   // ---- Team members (partner staff) ----
   const publicMember = (m: any) => ({ ...m, passwordHash: undefined, totpSecret: undefined });

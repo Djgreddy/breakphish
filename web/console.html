@@ -899,14 +899,21 @@ async function policyView(){
 async function polTemplates(){
   const {templates}=await api('/policy/templates');
   const v=el('<div></div>');
+  // Resolution: a customer's own default template wins over the global default.
+  const ownDefault=templates.find(t=>t.editable&&t.isDefault);
+  templates.forEach(t=>{t._active=ownDefault?(t.id===ownDefault.id):t.isDefault;});
+  if(STATE.role!=='partner'&&ownDefault){
+    v.appendChild(el(`<div class="card p" style="margin-bottom:12px;font-size:12.5px;background:var(--info-bg);border-left:3px solid var(--info)">Your template <b>${ownDefault.name}</b> is active and overrides the global default for your mail.</div>`));
+  }
   const head=el('<div style="display:flex;margin-bottom:12px"><div style="flex:1"></div></div>');
   const nb=el('<button class="btn primary sm">+ New template</button>');nb.onclick=()=>openTemplateEditor(null);head.appendChild(nb);v.appendChild(head);
   const card=el('<div class="card pad0" style="overflow:hidden"></div>');
-  const tbl=el('<table><thead><tr><th>Name</th><th>Deployment</th><th>Default</th><th>Scope</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
+  const tbl=el('<table><thead><tr><th>Name</th><th>Deployment</th><th>Status</th><th>Scope</th><th style="text-align:right"></th></tr></thead><tbody></tbody></table>');
   const tb=tbl.querySelector('tbody');
   if(!templates.length)tb.appendChild(el('<tr><td colspan="5" style="padding:30px;text-align:center;color:var(--faint)">No templates.</td></tr>'));
   templates.forEach(t=>{
-    const row=el(`<tr><td style="font-weight:600">${t.name}</td><td style="color:var(--muted)">${t.deployment||'—'}</td><td>${t.isDefault?'<span class="pill p-ok">Default</span>':''}</td><td><span class="pill p-muted">${t.scope==='partner'?'Global':'Customer'}</span></td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+    const statusCell=t._active?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span>':(t.isDefault?'<span class="pill p-muted" title="Overridden by a customer template">Default · overridden</span>':'');
+    const row=el(`<tr><td style="font-weight:600">${t.name}</td><td style="color:var(--muted)">${t.deployment||'—'}</td><td>${statusCell}</td><td><span class="pill p-muted">${t.scope==='partner'?'Global':'Customer'}</span></td><td style="text-align:right;white-space:nowrap"></td></tr>`);
     const act=row.children[4];
     const ed=el(`<button class="btn sm">${t.editable?'Edit':'View'}</button>`);ed.onclick=()=>openTemplateEditor(t);act.appendChild(ed);
     if(t.editable){const del=el('<button class="btn sm" style="margin-left:6px;color:var(--danger)">✕</button>');del.onclick=async()=>{if(!confirm('Delete template '+t.name+'?'))return;await api('/policy/templates/'+t.id,{method:'DELETE'});POLTAB='Policy Templates';go(STATE.role==='partner'?'p-policy':'policy');};act.appendChild(del);}
@@ -1126,9 +1133,9 @@ VIEWS.settings=async function(){
   const r=await api('/settings/config');SET=r.settings;SETSCOPE=r.scope;
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Settings</h1><p>${isPartner?'Partner defaults · applied to new customers':STATE._cust.name+' · customer settings'}</p></div>`));
-  const tabs=(isPartner?['Server','AI Provider']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']).concat(isPartner?[]:['Domains']);
+  const tabs=(isPartner?['Server','AI Provider']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']).concat(isPartner?[]:['Detection','Domains']);
   if(!SETTAB||!tabs.includes(SETTAB))SETTAB=tabs[0];
-  const RENDER={Server:settingsServer,'AI Provider':settingsAI,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners,Domains:settingsDomains};
+  const RENDER={Server:settingsServer,'AI Provider':settingsAI,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners,Detection:settingsDetection,Domains:settingsDomains};
   const wrap=el('<div style="display:flex;gap:20px;align-items:flex-start"></div>');
   const sideNav=el('<div class="card" style="width:220px;flex:none;padding:8px"></div>');
   const body=el('<div style="flex:1;min-width:0"></div>');
@@ -1332,6 +1339,25 @@ async function applyBranding(){
     }
   }catch(e){ brand.innerHTML=DEFAULT_BRAND; }
 }
+async function settingsDetection(){
+  const c=el('<div class="card p" style="max-width:680px"></div>');
+  c.appendChild(el('<h3 style="font-size:15px;margin-bottom:4px">Detection</h3>'));
+  c.appendChild(el('<div style="font-size:12.5px;color:var(--muted);margin-bottom:16px">BreakPhish analyzes every message with multiple detection layers. Core detection is always on to protect you; you control how mail is handled in <b>Policy</b> (per-verdict actions).</div>'));
+  // read-only status of always-on layers
+  let aiActive=false;try{const cfg=await api('/settings/ai-status');aiActive=cfg.aiActive;}catch(e){}
+  const statusRow=(name,desc,on,note)=>el(`<div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line2)"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">${name}</div><div style="font-size:11.5px;color:var(--faint)">${desc}</div></div>${on?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>'+(note||'Active')+'</span>':'<span class="pill p-muted">'+(note||'Off')+'</span>'}</div>`);
+  c.appendChild(statusRow('Static & heuristic scoring','SPF/DKIM/DMARC, reputation, URLs, attachments, keywords',true,'Always on'));
+  c.appendChild(statusRow('Lookalike-domain detection','Catches homoglyph / typo domains impersonating you or known brands',true,'Always on'));
+  c.appendChild(statusRow('Directory impersonation','Flags display names matching your staff sent from outside addresses',true,'Always on'));
+  c.appendChild(statusRow('Behavioral AI (intent analysis)','Judges intent/tone to catch payload-less BEC on ambiguous mail',aiActive,aiActive?'Active':'Not configured'));
+  // AI privacy opt-out
+  if(SET.aiAnalysisEnabled===undefined)SET.aiAnalysisEnabled=true;
+  const aiRow=el('<div style="display:flex;align-items:center;gap:14px;padding:14px 0 4px"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">AI content analysis</div><div style="font-size:11.5px;color:var(--faint)">When on, ambiguous inbound email content may be sent to the configured AI provider for intent analysis. Turn off to keep your email content from leaving for AI scoring (static detection still runs).</div></div></div>');
+  const tog=makeToggle(Boolean(SET.aiAnalysisEnabled));tog.onclick=(()=>{const o=tog.onclick;return()=>{o&&o();SET.aiAnalysisEnabled=tog._get();};})();aiRow.appendChild(tog);c.appendChild(aiRow);
+  c.appendChild(sSaveBar());
+  return c;
+}
+
 async function settingsDomains(){
   if(!Array.isArray(SET.managedDomains))SET.managedDomains=[];
   const c=el('<div class="card p"></div>');

@@ -20,6 +20,7 @@ export interface Settings {
   banners: { verdict: Record<string, Banner>; contextual: Record<string, Banner> };
   managedDomains: string[];   // custom domains the customer manages (treated as internal)
   bannersEnabled: boolean;    // stamp warning banners into delivered external mail
+  aiAnalysisEnabled: boolean; // send email content to the AI provider (privacy opt-out)
 }
 
 export const DIGEST_VERDICTS = ['clean','spam','spam_likely','phishing','malware','impersonation','policy_infomail','policy_geo'];
@@ -73,6 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   banners: DEFAULT_BANNERS,
   managedDomains: [],
   bannersEnabled: false,
+  aiAnalysisEnabled: true,
 };
 
 const cache = new Map<string, Settings>();
@@ -93,6 +95,7 @@ function merge(stored: any): Settings {
     },
     managedDomains: stored?.managedDomains ?? [],
     bannersEnabled: stored?.bannersEnabled ?? false,
+    aiAnalysisEnabled: stored?.aiAnalysisEnabled ?? true,
   };
 }
 
