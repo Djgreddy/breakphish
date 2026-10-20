@@ -7,6 +7,7 @@
 
 import type { Message, Signal } from './types';
 import { store } from '../store';
+import { senderStat } from './baseline';
 
 const COMMON_BRANDS = [
   'microsoft.com', 'office365.com', 'outlook.com', 'live.com', 'google.com', 'gmail.com',
@@ -166,6 +167,48 @@ export function attachmentScorer(m: Message): Signal[] {
   return out;
 }
 
+// Authentication depth: alignment, not just pass/fail.
+export function authDepthScorer(m: Message): Signal[] {
+  if (m.direction !== 'inbound' || m.source !== 'external') return [];
+  const fromDom = domainOf(m.fromAddress);
+  const own = (store.getTenant(m.tenantId)?.verifiedDomains ?? []).map(d => d.toLowerCase());
+  // Someone sending AS your own domain, from outside, without passing DMARC — spoofing you.
+  if (own.includes(fromDom) && m.auth.dmarc !== 'pass') {
+    return [{ code: 'own_domain_spoof', detail: `Message claims to be from your domain (${fromDom}) but failed authentication — likely spoofing`, category: 'impersonation', weight: 60 }];
+  }
+  // Passed SPF/DKIM but failed DMARC → the authenticated domain doesn't align with the From header.
+  if ((m.auth.spf === 'pass' || m.auth.dkim === 'pass') && m.auth.dmarc === 'fail') {
+    return [{ code: 'dmarc_alignment', detail: `Passed SPF/DKIM but failed DMARC — the authenticated domain doesn't match the From address (possible spoofing)`, category: 'phishing', weight: 38 }];
+  }
+  return [];
+}
+
+const URGENCY = ['urgent', 'immediately', 'asap', 'right away', 'as soon as possible', 'end of day', 'time-sensitive', 'act now', "don't delay", 'expires today', 'final notice'];
+const PAYMENT = ['wire transfer', 'wire the', 'gift card', 'itunes card', 'bank details', 'routing number', 'account number', 'direct deposit', 'change my bank', 'update payment', 'outstanding invoice', 'overdue invoice', 'bitcoin', 'crypto', 'payroll', 'ach transfer'];
+const CREDENTIAL = ['verify your account', 'confirm your password', 'unusual activity', 'sign in to', 'log in to', 'reset your password', 'account suspended', 'validate your', 'confirm your identity', 'verify your identity', 'click here to verify', 'your account will be'];
+const has = (text: string, list: string[]) => list.some(k => text.includes(k));
+
+// Content & structure: intent language + thread-hijacking.
+export function contentStructureScorer(m: Message): Signal[] {
+  if (m.direction !== 'inbound') return [];
+  const text = ((m.subject ?? '') + ' ' + (m.bodyText ?? '')).toLowerCase();
+  const out: Signal[] = [];
+  const urgency = has(text, URGENCY), payment = has(text, PAYMENT), credential = has(text, CREDENTIAL);
+  if (payment && urgency) out.push({ code: 'bec_urgency_payment', detail: 'Urgent request involving payment / wire / gift-cards — classic BEC pattern', category: 'impersonation', weight: 45 });
+  else if (payment) out.push({ code: 'payment_request', detail: 'Message requests a payment / financial action', category: 'spam', weight: 18 });
+  if (credential) out.push({ code: 'credential_lure', detail: 'Message asks you to verify credentials or account', category: 'phishing', weight: 30 });
+  else if (urgency) out.push({ code: 'urgency', detail: 'Urgency / pressure language', category: 'spam', weight: 10 });
+  // Thread hijacking: a Re:/Fwd: from someone we've never heard from.
+  if (/^\s*(re|fwd?|aw|wg)\s*:/i.test(m.subject ?? '') && m.source === 'external') {
+    const st = senderStat(m.tenantId, m.fromAddress);
+    if (!st || st.inbound === 0) out.push({ code: 'thread_hijack', detail: 'Reply/forward subject from a sender with no prior conversation', category: 'phishing', weight: 30 });
+  }
+  return out;
+}
+
 export function runDetectors(m: Message): Signal[] {
-  return [...lookalikeDomainScorer(m), ...directoryImpersonationScorer(m), ...punycodeScorer(m), ...replyToMismatchScorer(m), ...urlScorer(m), ...attachmentScorer(m)];
+  return [
+    ...lookalikeDomainScorer(m), ...directoryImpersonationScorer(m), ...punycodeScorer(m), ...replyToMismatchScorer(m),
+    ...urlScorer(m), ...attachmentScorer(m), ...authDepthScorer(m), ...contentStructureScorer(m),
+  ];
 }

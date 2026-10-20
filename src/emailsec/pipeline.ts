@@ -6,7 +6,8 @@
 import type { Message, Analysis, Signal, Verdict } from './types';
 import { runStaticScorers } from './scorers';
 import { runDetectors } from './detectors';
-import { baselineScorer, learn, isEstablished } from './baseline';
+import { baselineScorer, learn, isEstablished, senderStat } from './baseline';
+import { domainAgeDays } from './domainAge';
 import { classifyIntent, llmEnabled } from './llm';
 import { recordScored } from '../aiUsage';
 import { makeClassifier } from './classifier';
@@ -95,6 +96,19 @@ export async function analyze(message: Message): Promise<Analysis> {
   let signals = [...runStaticScorers(message), ...runDetectors(message), ...baselineScorer(message), ...await contentSignals(message)];
   let scores = trustDiscount(adjustSpamSensitivity(aggregate(signals), message.tenantId), message);
   let { verdict, confidence } = decideVerdict(scores);
+
+  // Newly-registered domain check — only for first-contact external senders (cached).
+  if (message.direction === 'inbound' && message.source === 'external') {
+    const st = senderStat(message.tenantId, message.fromAddress);
+    if (!st || st.inbound === 0) {
+      const days = await domainAgeDays(message.fromAddress.split('@')[1] ?? '');
+      if (days != null && days < 30) {
+        signals = [...signals, { code: 'new_domain', detail: `Sender domain was registered ${days} day${days === 1 ? '' : 's'} ago`, category: 'phishing', weight: days < 7 ? 42 : 25 }];
+        scores = trustDiscount(adjustSpamSensitivity(aggregate(signals), message.tenantId), message);
+        ({ verdict, confidence } = decideVerdict(scores));
+      }
+    }
+  }
 
   // Tier 2 — behavioral AI only on the ambiguous middle, and only for inbound
   // external mail (where BEC/phishing lives). Fail-open to the static verdict.
