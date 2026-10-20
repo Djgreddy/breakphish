@@ -27,6 +27,7 @@ import { appToken } from './directory/graphProvider';
 import { publicAiConfig, saveAiConfig } from './aiConfig';
 import { testLlm } from './emailsec/llm';
 import { getUsage } from './aiUsage';
+import { listSenderIntel, setSenderOverride, baselineReason } from './emailsec/baseline';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -86,6 +87,20 @@ export function buildApi() {
   api.use(requireAuth);                              // every API call needs a session
   api.use(blockReadOnlyWrites);                      // read-only team members: GET only
   api.use('/customers/:id', requireCustomerAccess); // per-customer scope check
+
+  // ---- Sender Intelligence (behavioral baseline) — partner admins only ----
+  api.get('/customers/:id/sender-intel', requirePartner, requireTeamAdmin, (req, res) => {
+    res.json({ senders: listSenderIntel(req.params.id) });
+  });
+  api.post('/customers/:id/sender-intel/override', requirePartner, requireTeamAdmin, async (req, res) => {
+    try {
+      const sender = String(req.body?.sender ?? ''); const value = req.body?.override;
+      if (!sender || !['trusted', 'untrusted', 'reset'].includes(value)) return res.status(400).json({ error: 'sender and override (trusted|untrusted|reset) required' });
+      await setSenderOverride(req.params.id, sender, value);
+      logReq(req, 'sender.override', sender, value, req.params.id);
+      res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
 
   // ---- Audit log ----
   const logReq = (req: any, action: string, resource?: string, detail?: string, customerId?: string) => {
@@ -540,7 +555,7 @@ export function buildApi() {
     const CTX: Record<string, string> = { spam: 'Content - Spam', phishing: 'Content - Phishing', malware: 'Attachment - Malware', impersonation: 'Identity - Impersonation', policy_infomail: 'Content - Infomail', policy_geo: 'Origin - Geo', auth: 'Authentication', reputation: 'Sender Reputation', url: 'Content - URL', behavioral: 'Behavioral' };
     const context = a.verdict === 'clean' ? 'Clean' : (top ? (CTX[top.category] ?? top.category) : CTX[a.verdict] ?? '—');
     const rule = matchingRule(m.tenantId, m.fromAddress);
-    const enrich = { queueId: m.id, senderIp: m.senderIp || '', country: m.senderCountry || '', msVerdict: m.msVerdict || '', context, rules: rule ? rule.label : '', spamScore: Math.round(((a.signals ?? []).reduce((s: number, x: any) => s + (x.weight ?? 0), 0) / 14) * 100) / 100 };
+    const enrich = { queueId: m.id, senderIp: m.senderIp || '', country: m.senderCountry || '', msVerdict: m.msVerdict || '', context, rules: rule ? rule.label : '', senderIntel: baselineReason(m.tenantId, m.fromAddress), spamScore: Math.round(((a.signals ?? []).reduce((s: number, x: any) => s + (x.weight ?? 0), 0) / 14) * 100) / 100 };
     res.json({ message: m, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich });
   });
 

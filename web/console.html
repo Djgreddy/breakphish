@@ -260,7 +260,7 @@ function chrome(){
 async function go(view){
   STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';STATE.filterRange='all';STATE.filterDomain='';
   if(view==='tracker'&&PRESET_STATUS){STATE.filterStatus=PRESET_STATUS;}PRESET_STATUS=null;
-  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Message Log',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Message Log','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs','p-dashboard':'Partner Dashboard','audit':'Audit Logs','analytics':'Analytics'})[view]||view;
+  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Message Log',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Message Log','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs','p-dashboard':'Partner Dashboard','audit':'Audit Logs','analytics':'Analytics','sender-intel':'Sender Intelligence'})[view]||view;
   chrome();
   const host=document.getElementById('view');host.innerHTML='<div class="loading"><div class="spin"></div>Loading live data…</div>';
   try{const node=await VIEWS[view]();host.innerHTML='';host.appendChild(node);}
@@ -473,6 +473,7 @@ async function openMessage(id){
       ${kv('SPF',authPill(m.auth.spf))}${kv('DKIM',authPill(m.auth.dkim))}${kv('DMARC',authPill(m.auth.dmarc))}
       ${kv('Spam Score',`<span class="mono">${(en.spamScore!=null?en.spamScore:spamScore/14).toFixed(2)}</span>`)}
       ${kv('Rule(s)',en.rules?`<span class="mono" style="font-size:12px">${en.rules}</span>`:'—')}
+      ${kv('Sender (AI baseline)',en.senderIntel?`<span class="pill p-muted">${en.senderIntel}</span>`:'—')}
       ${kv('Known Contact',m.firstTimeSender?'No':'Yes')}
       ${kv('Signals',(a.signals||[]).length?(a.signals.map(s=>`<div class="sig" style="padding:6px 0"><div class="ic ${toneCls[s.category]||'p-muted'}">!</div><div class="st"><b>${s.detail}</b><span style="color:var(--muted);font-size:12px">${s.code}</span></div><div class="w">+${s.weight}</div></div>`).join('')):'No risk signals.')}</div>`,
     'Preview':()=>{const held=['quarantine','remediated'].includes(a.disposition);return held&&m.bodyText?`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Email body</div><div style="border:1px solid var(--line2);border-radius:10px;padding:14px;font-size:13px;white-space:pre-wrap;color:var(--txt);max-height:46vh;overflow:auto">${(m.bodyText||'').replace(/</g,'&lt;')}</div>`:`<div style="padding:16px;color:var(--warn);font-size:13px">No preview available. Preview is only shown for quarantined mail; clean and delivered mail content is not stored.</div>`;},
@@ -574,6 +575,46 @@ async function openDigest(email){
     try{await api('/customers/'+STATE.customerId+'/digest/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email})});toast('Digest sent to '+email);closeModal();}
     catch(e){toast('Send failed: '+e.message);ev.target.textContent='Send digest email';ev.target.disabled=false;}};
 }
+
+/* ---- Sender Intelligence (behavioral baseline — partner admins) ---- */
+VIEWS['sender-intel']=async function(){
+  const c=STATE._intelCust;
+  const v=el('<div></div>');
+  v.appendChild(el(`<div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between"><div><h1>Sender Intelligence</h1><p>${c?c.name:''} · what the behavioral AI has learned about senders</p></div></div>`));
+  const back=v.querySelector('.ph');const bb=el('<button class="btn sm">← Customers</button>');bb.onclick=()=>go('customers');back.appendChild(bb);
+  if(!c){v.appendChild(el('<div class="card p">Open this from a customer\'s ⋮ menu.</div>'));return v;}
+  const card=el('<div class="card"></div>');
+  const filt=el('<div class="filters"><input id="sisearch" placeholder="Search sender…" style="flex:1;min-width:220px"><select id="sifilter"><option value="">All senders</option><option value="trusted">Trusted</option><option value="first">First-time</option><option value="watch">Admin-watch</option></select></div>');
+  card.appendChild(filt);
+  const twrap=el('<div class="tablewrap"></div>');
+  const tbl=el('<table style="min-width:820px"><thead><tr><th>Sender</th><th>Seen</th><th>Two-way</th><th>First seen</th><th>Last seen</th><th>Baseline</th><th style="text-align:right">Override</th></tr></thead><tbody></tbody></table>');
+  const tb=tbl.querySelector('tbody');twrap.appendChild(tbl);card.appendChild(twrap);
+  let rows=[];
+  async function load(){const r=await api('/customers/'+c.id+'/sender-intel');rows=r.senders;draw();}
+  function pill(reason){const map={'Admin-trusted':'p-ok','Trusted correspondent':'p-ok','Known sender':'p-muted','First-time sender':'p-warn','Admin-watch':'p-danger'};return `<span class="pill ${map[reason]||'p-muted'}">${reason}</span>`;}
+  function draw(){
+    const q=(filt.querySelector('#sisearch').value||'').toLowerCase();const f=filt.querySelector('#sifilter').value;
+    tb.innerHTML='';
+    let list=rows.filter(r=>!q||r.sender.includes(q));
+    if(f==='trusted')list=list.filter(r=>r.trusted);
+    else if(f==='first')list=list.filter(r=>r.reason==='First-time sender');
+    else if(f==='watch')list=list.filter(r=>r.override==='untrusted');
+    if(!list.length){tb.appendChild(el('<tr><td colspan="7" style="padding:30px;text-align:center;color:var(--faint)">No senders learned yet.</td></tr>'));return;}
+    list.slice(0,300).forEach(r=>{
+      const row=el(`<tr><td style="font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.sender}</td><td class="mono">${r.count}</td><td>${r.outbound>0?'<span class="pill p-ok">Yes</span>':'<span class="pill p-muted">No</span>'}</td><td class="mono" style="color:var(--muted);font-size:11px">${r.firstSeen?new Date(r.firstSeen).toLocaleDateString():'—'}</td><td class="mono" style="color:var(--muted);font-size:11px">${r.lastSeen?new Date(r.lastSeen).toLocaleDateString():'—'}</td><td>${pill(r.reason)}</td><td style="text-align:right;white-space:nowrap"></td></tr>`);
+      const act=row.children[6];
+      const mk=(label,val,cls)=>{const b=el(`<button class="btn sm ${cls}" style="margin-left:6px">${label}</button>`);b.onclick=async()=>{try{await api('/customers/'+c.id+'/sender-intel/override',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sender:r.sender,override:val})});toast('Updated '+r.sender);load();}catch(e){toast('Failed: '+e.message);}};return b;};
+      if(r.override!=='trusted')act.appendChild(mk('Trust','trusted','ok'));
+      if(r.override!=='untrusted')act.appendChild(mk('Watch','untrusted','danger'));
+      if(r.override)act.appendChild(mk('Reset','reset',''));
+      tb.appendChild(row);
+    });
+  }
+  let sdeb;filt.querySelector('#sisearch').oninput=()=>{clearTimeout(sdeb);sdeb=setTimeout(draw,200);};
+  filt.querySelector('#sifilter').onchange=draw;
+  v.appendChild(card);await load();
+  return v;
+};
 
 /* ---- Partner Dashboard ---- */
 VIEWS['p-dashboard']=async function(){
@@ -1442,6 +1483,7 @@ function openRowMenu(btn,c){
     c.mode==='passive'?{label:'▶  Activate protection', onClick:()=>setMode(c,'active')}:{label:'⏸  Switch to monitor mode', onClick:()=>setMode(c,'passive')},
     connected?{label:'↻  Azure Sync', onClick:()=>resyncCustomer(c)}:null,
     connected?{label:'⟳  O365 Reauthorize', onClick:()=>reauth(c)}:null,
+    connected?{label:'🧠  Sender Intelligence', onClick:()=>{STATE._intelCust=c;go('sender-intel');}}:null,
     {label:'⇄  Switch Service', onClick:()=>toast('Switching service (Gateway/Unified) — coming soon')},
     {label:'✕  Delete customer', danger:true, onClick:()=>deleteCust(c)},
   ].filter(Boolean);

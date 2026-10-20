@@ -18,7 +18,7 @@ import { hydratePolicy } from './policy';
 import { hydrateTeam } from './team';
 import { hydrateAiConfig } from './aiConfig';
 import { hydrateAiUsage } from './aiUsage';
-import { hydrateBaseline } from './emailsec/baseline';
+import { hydrateBaseline, hydrateSenderOverrides } from './emailsec/baseline';
 import { hydrateAudit } from './audit';
 import { buildWebhookApp } from './webhooks';
 import { buildPortalApp } from './quarantinePortal';
@@ -78,6 +78,7 @@ async function main() {
       await hydrateAudit();
       await hydrateAiConfig();
       await hydrateAiUsage();
+      await hydrateSenderOverrides();
       const baseN = hydrateBaseline();
       console.log(`[baseline] learned ${baseN} sender relationships from history`);
       console.log(`[db] hydrated ${c} customers, ${n} connections, ${dir.users} users, ${dir.groups} groups, ${em.messages} messages, ${st} settings, ${pol.templates} policy templates, ${subN} subscriptions from Postgres`);

@@ -281,3 +281,12 @@ alter table analyses add column if not exists released_manually boolean not null
 -- enforcement mode: 'passive' (monitor — score+log, no actions) or 'active' (enforce)
 -- existing customers default to active (they were already enforcing); new trials start passive.
 alter table customers add column if not exists mode text not null default 'active';
+
+-- admin overrides of the behavioral baseline's trust judgment, per customer+sender
+create table if not exists sender_overrides (
+  customer_id text not null,
+  sender      text not null,
+  override    text not null,          -- 'trusted' | 'untrusted'
+  updated_at  timestamptz not null default now(),
+  primary key (customer_id, sender)
+);
