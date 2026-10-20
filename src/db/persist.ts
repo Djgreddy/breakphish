@@ -9,7 +9,7 @@ export interface CustomerRow {
   id: string; name: string; primary_domain: string; entra_tenant_id: string | null;
   verified_domains: string[]; products: string[]; integration_model: string | null;
   mailboxes: number; status: string;
-  licenses: number; ordered_at: string | Date; flags: any;
+  licenses: number; ordered_at: string | Date; flags: any; mode: string;
 }
 export interface ConnectionRow {
   customer_id: string; entra_tenant_id: string | null; status: string; reason: string | null;
@@ -20,19 +20,19 @@ export interface ConnectionRow {
 export async function upsertCustomer(c: {
   id: string; name: string; primaryDomain: string; entraTenantId?: string;
   verifiedDomains: string[]; products: string[]; integrationModel?: string;
-  mailboxes: number; status?: string; licenses?: number; orderedAt?: string; flags?: any;
+  mailboxes: number; status?: string; licenses?: number; mode?: string; orderedAt?: string; flags?: any;
 }): Promise<void> {
   await q(
-    `insert into customers (id,name,primary_domain,entra_tenant_id,verified_domains,products,integration_model,mailboxes,status,licenses,ordered_at,flags)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    `insert into customers (id,name,primary_domain,entra_tenant_id,verified_domains,products,integration_model,mailboxes,status,licenses,ordered_at,flags,mode)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      on conflict (id) do update set
        name=excluded.name, primary_domain=excluded.primary_domain, entra_tenant_id=excluded.entra_tenant_id,
        verified_domains=excluded.verified_domains, products=excluded.products,
        integration_model=excluded.integration_model, mailboxes=excluded.mailboxes, status=excluded.status,
-       licenses=excluded.licenses, ordered_at=excluded.ordered_at, flags=excluded.flags`,
+       licenses=excluded.licenses, ordered_at=excluded.ordered_at, flags=excluded.flags, mode=excluded.mode`,
     [c.id, c.name, c.primaryDomain, c.entraTenantId ?? null, c.verifiedDomains, c.products,
      c.integrationModel ?? null, c.mailboxes, c.status ?? 'active',
-     c.licenses ?? 0, c.orderedAt ?? new Date().toISOString(), JSON.stringify(c.flags ?? {})],
+     c.licenses ?? 0, c.orderedAt ?? new Date().toISOString(), JSON.stringify(c.flags ?? {}), c.mode ?? 'active'],
   );
 }
 

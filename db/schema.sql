@@ -277,3 +277,7 @@ alter table ai_config add column if not exists output_price numeric not null def
 
 -- flag for messages delivered via a manual admin release
 alter table analyses add column if not exists released_manually boolean not null default false;
+
+-- enforcement mode: 'passive' (monitor — score+log, no actions) or 'active' (enforce)
+-- existing customers default to active (they were already enforcing); new trials start passive.
+alter table customers add column if not exists mode text not null default 'active';

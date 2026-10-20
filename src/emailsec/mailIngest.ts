@@ -14,6 +14,7 @@ import { analyze } from './pipeline';
 import { emailStore } from './store';
 import { applyDisposition, prependBanner, rewriteLinks } from './mailActions';
 import { getSettings } from '../settings';
+import { isActive } from '../onboarding';
 import { dlpMatch, hasActiveLinkRewrite } from '../policy';
 import { audit } from '../audit';
 import { config } from '../config';
@@ -130,17 +131,20 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
     const msg = normalize(tenantId, verifiedDomains, m, folder);
     const analysis = await analyze(msg);
     const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
+    const active = isActive(tenantId); // passive (monitor) customers are scored but not acted on
     // Enforce: act on the real mailbox for inbound mail the policy junks/quarantines.
     if (folder === 'inbox' && ['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
-      await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
+      if (active) await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
     } else if (folder === 'inbox') {
-      await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
-      if (hasActiveLinkRewrite(tenantId)) await rewriteLinks(entraTenantId, userId, ref, config.publicBaseUrl);
+      if (active) {
+        await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
+        if (hasActiveLinkRewrite(tenantId)) await rewriteLinks(entraTenantId, userId, ref, config.publicBaseUrl);
+      }
     } else if (folder === 'sentitems') {
       const dlp = dlpMatch(tenantId, msg);
       if (dlp) {
         audit({ action: 'dlp.match', resource: msg.subject, detail: `outbound to ${msg.to} matched DLP rule`, customerId: tenantId });
-        if (dlp.data.action === 'quarantine') await applyDisposition(entraTenantId, userId, ref, 'quarantine');
+        if (active && dlp.data.action === 'quarantine') await applyDisposition(entraTenantId, userId, ref, 'quarantine');
       }
     }
     scored++;
@@ -172,11 +176,13 @@ export async function ingestOneMessage(tenantId: string, entraTenantId: string, 
   const msg = normalize(tenantId, internalDomains, m, 'inbox');
   const analysis = await analyze(msg);
   const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
-  if (['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
-    await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
-  } else {
-    await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
-    if (hasActiveLinkRewrite(tenantId)) await rewriteLinks(entraTenantId, userId, ref, config.publicBaseUrl);
+  if (isActive(tenantId)) { // passive customers are scored but not acted on
+    if (['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
+      await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
+    } else {
+      await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
+      if (hasActiveLinkRewrite(tenantId)) await rewriteLinks(entraTenantId, userId, ref, config.publicBaseUrl);
+    }
   }
   return analysis.disposition;
 }

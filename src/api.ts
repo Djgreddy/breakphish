@@ -71,7 +71,7 @@ function customerSummary(c: Customer) {
     mailboxes: c.mailboxes, licenses: c.licenses,
     status: 'active',
     service: c.integrationModel === 'api' ? 'BreakPhish 365' : (c.integrationModel ?? ''),
-    orderedAt: c.orderedAt, flags: c.flags, integrationModel: c.integrationModel,
+    mode: c.mode, orderedAt: c.orderedAt, flags: c.flags, integrationModel: c.integrationModel,
     connection: conn ? { status: conn.status, verifiedDomains: conn.verifiedDomains ?? [] } : { status: 'not_connected', verifiedDomains: [] },
     syncedUsers: store.usersForTenant(c.id).length,
     realtime: listSubscriptions().filter(s => s.customerId === c.id).length,
@@ -379,6 +379,17 @@ export function buildApi() {
     const c = getCustomer(req.params.id);
     if (!c) return res.status(404).json({ error: 'not found' });
     res.json(customerSummary(c));
+  });
+
+  // Set enforcement mode (partner only): passive (monitor) ↔ active (enforce).
+  api.post('/customers/:id/mode', requirePartner, async (req, res) => {
+    try {
+      const mode = req.body?.mode === 'active' ? 'active' : 'passive';
+      const c = await editCustomer(req.params.id, { mode });
+      if (!c) return res.status(404).json({ error: 'not found' });
+      logReq(req, 'customer.mode', req.params.id, mode);
+      res.json({ ok: true, mode });
+    } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
 
   // Edit a customer's name, license count, and feature flags.

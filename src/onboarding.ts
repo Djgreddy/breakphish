@@ -43,6 +43,7 @@ export interface Customer extends Tenant {
   integrationModel?: IntegrationModel;
   mailboxes: number;
   licenses: number;
+  mode: 'passive' | 'active';
   orderedAt: string;
   flags: CustomerFlags;
   createdAt: string;
@@ -56,7 +57,7 @@ function persist(c: Customer): Promise<void> | void {
     id: c.id, name: c.name, primaryDomain: c.primaryDomain, entraTenantId: c.entraTenantId,
     verifiedDomains: c.verifiedDomains, products: c.products, integrationModel: c.integrationModel,
     mailboxes: c.mailboxes, status: 'active',
-    licenses: c.licenses, orderedAt: c.orderedAt, flags: c.flags,
+    licenses: c.licenses, mode: c.mode, orderedAt: c.orderedAt, flags: c.flags,
   });
 }
 
@@ -84,6 +85,7 @@ export async function onboardCustomer(input: OnboardInput): Promise<Customer> {
     integrationModel: input.integrationModel,
     mailboxes: input.mailboxes ?? 0,
     licenses: input.products.includes('sat') ? (input.mailboxes ?? 0) : 0,
+    mode: 'passive',
     orderedAt: new Date().toISOString(),
     flags: { ...DEFAULT_FLAGS },
     createdAt: new Date().toISOString(),
@@ -94,11 +96,12 @@ export async function onboardCustomer(input: OnboardInput): Promise<Customer> {
 }
 
 // Edit mutable customer fields (name, licenses, feature flags).
-export async function editCustomer(id: string, patch: { name?: string; licenses?: number; flags?: Partial<CustomerFlags> }): Promise<Customer | null> {
+export async function editCustomer(id: string, patch: { name?: string; licenses?: number; mode?: 'passive' | 'active'; flags?: Partial<CustomerFlags> }): Promise<Customer | null> {
   const c = customers.get(id);
   if (!c) return null;
   if (patch.name != null) { c.name = patch.name; const t = store.getTenant(id); if (t) t.name = patch.name; }
   if (patch.licenses != null) c.licenses = Math.max(0, Math.floor(patch.licenses));
+  if (patch.mode) c.mode = patch.mode;
   if (patch.flags) c.flags = { ...c.flags, ...patch.flags };
   await persist(c);
   return c;
@@ -117,6 +120,9 @@ export async function markCustomerConnected(id: string, entraTenantId: string, v
 }
 
 export function getCustomer(id: string) { return customers.get(id); }
+// Enforcement gate: only 'active' customers get automatic mailbox actions.
+// 'passive' (monitor) customers are still fully scored + learned, just not acted on.
+export function isActive(id: string): boolean { return (customers.get(id)?.mode ?? 'active') === 'active'; }
 export function listCustomers() { return [...customers.values()]; }
 
 // Offboard a customer: wipe all its in-memory state and, when a DB is present,
@@ -153,6 +159,7 @@ export async function hydrateCustomers(): Promise<number> {
       integrationModel: (r.integration_model ?? undefined) as IntegrationModel | undefined,
       mailboxes: r.mailboxes,
       licenses: r.licenses ?? 0,
+      mode: ((r.mode ?? 'active') as 'passive' | 'active'),
       orderedAt: r.ordered_at ? (r.ordered_at instanceof Date ? r.ordered_at.toISOString() : r.ordered_at) : new Date().toISOString(),
       flags: { ...DEFAULT_FLAGS, ...(r.flags ?? {}) },
       createdAt: new Date().toISOString(),

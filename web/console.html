@@ -311,7 +311,7 @@ VIEWS.customers=async function(){
         <td><div class="co"><div class="lg" style="background:${COLORS[i%COLORS.length]}">${initials(c.name)}</div><div style="font-weight:600">${c.name}</div></div></td>
         <td style="color:var(--muted)">${c.domain}</td><td>${prods}</td>
         <td><span class="pill p-muted">${c.service||'—'}</span></td>
-        <td>${conn}</td>
+        <td>${conn} ${c.mode==='passive'?'<span class="pill p-warn" title="Monitor mode — scoring only, no enforcement">Monitor</span>':'<span class="pill p-ok">Active</span>'}</td>
         <td class="mono">${c.syncedUsers||'—'}</td>
         <td class="mono">${c.licenses||'—'}</td>
         <td class="mono" style="color:var(--muted)">${ordered}</td>
@@ -340,6 +340,9 @@ VIEWS.dashboard=async function(){
   const seg=el('<div style="display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:3px"></div>');
   [['7d','Last 7 Days'],['30d','Last 30 Days']].forEach(([val,lbl])=>{const b=el(`<button style="padding:7px 13px;border:none;border-radius:7px;font-size:12.5px;font-weight:600;background:${DASH_RANGE===val?'var(--brand)':'none'};color:${DASH_RANGE===val?'#fff':'var(--muted)'}">${lbl}</button>`);b.onclick=()=>{DASH_RANGE=val;go('dashboard');};seg.appendChild(b);});
   head.appendChild(seg);v.appendChild(head);
+  if(STATE._cust&&STATE._cust.mode==='passive'){
+    v.appendChild(el(`<div class="card p" style="margin-bottom:16px;background:var(--warn-bg);border-left:3px solid var(--warn)"><div style="font-weight:600;font-size:14px">⏸ Monitor mode — protection not yet active</div><div style="font-size:13px;color:var(--muted);margin-top:4px">BreakPhish is scoring every message and learning your organization's patterns, but <b>not acting</b> on mail yet. Over this period it <b>would have</b> quarantined <b style="color:var(--danger)">${(d.quarantined||0).toLocaleString()}</b> messages (${d.threats||0} threats) that reached inboxes. Ask your provider to activate protection when you're ready.</div></div>`));
+  }
   // summary cards with trend deltas
   const trend=(pctv)=>{if(pctv===0)return '';const up=pctv>0;return `<span style="font-size:12px;color:${up?'var(--ok)':'var(--danger)'}">${up?'+':''}${pctv}% ${up?'↗':'↘'}</span>`;};
   const scard=(label,val,delta,color)=>el(`<div class="card p"><div style="font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em">${label}</div><div style="font-size:26px;font-weight:700;margin:4px 0;${color?`color:${color}`:''}">${Number(val).toLocaleString()}</div>${delta!=null?trend(delta):''}</div>`);
@@ -383,7 +386,7 @@ function stat(l,v,color){return `<div class="s"><div class="l">${l}</div><div cl
 VIEWS.tracker=async function(){return trackerNode();};
 async function trackerNode(){
   const qs=new URLSearchParams({page:STATE.page,from:STATE.filterFrom,to:STATE.filterTo,direction:STATE.filterDir,status:STATE.filterStatus,verdict:STATE.filterVerdict,q:STATE.filterText,range:STATE.filterRange,domain:STATE.filterDomain,dfrom:STATE.dateFrom,dto:STATE.dateTo});
-  if(!STATE._domains){try{const c=await api('/customers/'+STATE.customerId);STATE._domains=[...new Set([c.domain,...(c.connection?.verifiedDomains||[])].filter(Boolean))];}catch(e){STATE._domains=[];}}
+  if(!STATE._domains){try{const c=await api('/customers/'+STATE.customerId);STATE._domains=[...new Set([c.domain,...(c.connection?.verifiedDomains||[])].filter(Boolean))];STATE._mode=c.mode;}catch(e){STATE._domains=[];}}
   const data=await api(`/customers/${STATE.customerId}/messages?${qs}`);
   const v=el('<div></div>');
   const head=el(`<div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between"><div><h1>Message Log</h1><p>${STATE._cust.name} · inbound &amp; outbound, scored in real time</p></div></div>`);
@@ -391,6 +394,7 @@ async function trackerNode(){
   scan.onclick=async()=>{scan.textContent='Scanning…';scan.disabled=true;try{const r=await api('/customers/'+STATE.customerId+'/scan-mail',{method:'POST'});toast('Scanned '+r.mailboxes+' mailbox(es), '+r.scored+' new message(s)');refresh();}catch(e){toast('Scan failed: '+e.message);scan.textContent='↻ Scan mail';scan.disabled=false;}};
   head.appendChild(scan);
   v.appendChild(head);
+  if(STATE._mode==='passive')v.appendChild(el('<div class="card p" style="margin-bottom:14px;background:var(--warn-bg);border-left:3px solid var(--warn);font-size:13px"><b>⏸ Monitor mode</b> — BreakPhish is scoring and learning but <b>not acting</b> on mail. The Status column shows what it <b>would</b> do once activated.</div>'));
   const card=el('<div class="card"></div>');
   const RANGE_OPTS=[['all','All time'],['today','Today'],['7d','Last 7 days'],['30d','Last 30 days'],['custom','Custom']];
   const domOpts=(STATE._domains||[]).map(dn=>`<option value="${dn}" ${STATE.filterDomain===dn?'selected':''}>${dn}</option>`).join('');
@@ -428,7 +432,7 @@ async function trackerNode(){
       <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.to}</td>
       <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
       <td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td>
-      <td><span class="pill ${DISP_CLS[m.status]}">${DISP_LABEL[m.status]}</span></td>
+      <td><span class="pill ${DISP_CLS[m.status]}">${STATE._mode==='passive'&&['junk','quarantine','remediated'].includes(m.status)?'Would '+DISP_LABEL[m.status].toLowerCase():DISP_LABEL[m.status]}</span></td>
       <td style="color:var(--muted)"><span class="pill p-muted" style="font-weight:500">${m.service||'—'}</span></td>
       <td style="color:var(--muted)">${srcLabel}</td>
       <td style="text-align:right"></td></tr>`);
@@ -1424,6 +1428,7 @@ function openRowMenu(btn,c){
   const connected=c.connection.status==='connected';
   const items=[
     {label:'✎  Edit', onClick:()=>openEditCustomer(c)},
+    c.mode==='passive'?{label:'▶  Activate protection', onClick:()=>setMode(c,'active')}:{label:'⏸  Switch to monitor mode', onClick:()=>setMode(c,'passive')},
     connected?{label:'↻  Azure Sync', onClick:()=>resyncCustomer(c)}:null,
     connected?{label:'⟳  O365 Reauthorize', onClick:()=>reauth(c)}:null,
     {label:'⇄  Switch Service', onClick:()=>toast('Switching service (Gateway/Unified) — coming soon')},
@@ -1438,6 +1443,11 @@ function openRowMenu(btn,c){
   window._rm=m;
 }
 async function resyncCustomer(c){try{const r=await api('/customers/'+c.id+'/resync',{method:'POST'});toast(`Synced ${r.users} users, scored ${r.scored} new`);go('customers');}catch(e){toast('Re-sync failed: '+e.message);}}
+async function setMode(c,mode){
+  const msg=mode==='active'?`Activate protection for ${c.name}? BreakPhish will start enforcing (quarantine, junk, banners) on their mail.`:`Switch ${c.name} to monitor mode? BreakPhish will keep scoring and learning but stop acting on their mail.`;
+  if(!confirm(msg))return;
+  try{await api('/customers/'+c.id+'/mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode})});toast(mode==='active'?'Protection activated':'Switched to monitor mode');go('customers');}catch(e){toast('Failed: '+e.message);}
+}
 async function reauth(c){try{const r=await api('/customers/'+c.id+'/connect',{method:'POST'});if(r.redirect){toast('Opening Microsoft consent…');window.location.href=r.redirect;return;}toast('Reauthorized '+c.name);go('customers');}catch(e){toast('Reauthorize failed: '+e.message);}}
 async function deleteCust(c){if(!confirm(`Delete ${c.name}? This removes its users, mail, and all data. This cannot be undone.`))return;try{await api('/customers/'+c.id,{method:'DELETE'});toast('Deleted '+c.name);go('customers');}catch(e){toast('Delete failed: '+e.message);}}
 
