@@ -6,6 +6,7 @@
 import type { Message, Analysis, Signal, Verdict } from './types';
 import { runStaticScorers } from './scorers';
 import { runDetectors } from './detectors';
+import { baselineScorer, learn, isEstablished } from './baseline';
 import { classifyIntent, llmEnabled } from './llm';
 import { recordScored } from '../aiUsage';
 import { makeClassifier } from './classifier';
@@ -58,6 +59,18 @@ async function contentSignals(m: Message): Promise<Signal[]> {
   return out;
 }
 
+// Established two-way correspondents are trusted — dampen their non-malware risk
+// so normal business mail from known partners isn't false-flagged.
+function trustDiscount(scores: Record<Category, number>, m: Message): Record<Category, number> {
+  if (m.direction === 'inbound' && m.source === 'external' && isEstablished(m.tenantId, m.fromAddress)) {
+    scores.spam = Math.round(scores.spam * 0.5);
+    scores.phishing = Math.round(scores.phishing * 0.6);
+    scores.impersonation = Math.round(scores.impersonation * 0.7);
+    // malware is never discounted by relationship
+  }
+  return scores;
+}
+
 // Spam filtering sensitivity (from the active policy template) scales the spam
 // score: High flags more, Low flags less. Medium is neutral.
 function adjustSpamSensitivity(scores: Record<Category, number>, tenantId: string): Record<Category, number> {
@@ -79,8 +92,8 @@ export async function analyze(message: Message): Promise<Analysis> {
   emailStore.saveMessage(message);
   if (message.direction === 'inbound' && message.source === 'external') recordScored();
 
-  let signals = [...runStaticScorers(message), ...runDetectors(message), ...await contentSignals(message)];
-  let scores = adjustSpamSensitivity(aggregate(signals), message.tenantId);
+  let signals = [...runStaticScorers(message), ...runDetectors(message), ...baselineScorer(message), ...await contentSignals(message)];
+  let scores = trustDiscount(adjustSpamSensitivity(aggregate(signals), message.tenantId), message);
   let { verdict, confidence } = decideVerdict(scores);
 
   // Tier 2 — behavioral AI only on the ambiguous middle, and only for inbound
@@ -92,7 +105,7 @@ export async function analyze(message: Message): Promise<Analysis> {
     if (r && r.confidence >= 0.6 && r.verdict !== 'clean') {
       const cat = r.verdict === 'bec' ? 'impersonation' : r.verdict === 'spam' ? 'spam' : r.verdict;
       signals = [...signals, { code: 'ai_intent', detail: `AI: ${r.verdict} — ${r.reason}`, category: cat as any, weight: Math.round(r.confidence * 55) }];
-      scores = adjustSpamSensitivity(aggregate(signals), message.tenantId);
+      scores = trustDiscount(adjustSpamSensitivity(aggregate(signals), message.tenantId), message);
       ({ verdict, confidence } = decideVerdict(scores));
     } else if (r) {
       signals = [...signals, { code: 'ai_intent', detail: `AI: clean — ${r.reason}`, category: 'spam', weight: 0 }];
@@ -118,6 +131,7 @@ export async function analyze(message: Message): Promise<Analysis> {
     signals,
   };
   emailStore.saveAnalysis(analysis);
+  learn(message); // update the behavioral baseline with this correspondence
   await persistScored(message, analysis); // durably store the message + its verdict
   return analysis;
 }

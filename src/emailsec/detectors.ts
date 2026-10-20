@@ -79,6 +79,31 @@ export function directoryImpersonationScorer(m: Message): Signal[] {
   return [];
 }
 
+// Punycode / IDN homograph: xn-- domains render as lookalike Unicode (e.g. аpple.com).
+export function punycodeScorer(m: Message): Signal[] {
+  if (m.direction !== 'inbound' || m.source !== 'external') return [];
+  const dom = domainOf(m.fromAddress);
+  if (dom.split('.').some(label => label.startsWith('xn--'))) {
+    return [{ code: 'punycode_domain', detail: `Sender uses an internationalized (punycode) domain "${dom}" — often a homograph/lookalike attack`, category: 'phishing', weight: 50 }];
+  }
+  return [];
+}
+
+// Reply-To points to a different (external) domain than the From address — classic
+// reply-address spoofing used in BEC.
+export function replyToMismatchScorer(m: Message): Signal[] {
+  if (m.direction !== 'inbound' || !m.replyTo) return [];
+  const fromDom = domainOf(m.fromAddress);
+  const replyDom = domainOf(m.replyTo);
+  if (replyDom && fromDom && replyDom !== fromDom) {
+    const tenant = store.getTenant(m.tenantId);
+    const own = (tenant?.verifiedDomains ?? []).map(d => d.toLowerCase());
+    if (own.includes(replyDom)) return []; // reply back into the org — fine
+    return [{ code: 'reply_to_mismatch', detail: `Reply-To domain "${replyDom}" differs from the sender domain "${fromDom}"`, category: 'phishing', weight: 35 }];
+  }
+  return [];
+}
+
 export function runDetectors(m: Message): Signal[] {
-  return [...lookalikeDomainScorer(m), ...directoryImpersonationScorer(m)];
+  return [...lookalikeDomainScorer(m), ...directoryImpersonationScorer(m), ...punycodeScorer(m), ...replyToMismatchScorer(m)];
 }
