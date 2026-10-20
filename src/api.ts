@@ -29,6 +29,7 @@ import { testLlm } from './emailsec/llm';
 import { getUsage } from './aiUsage';
 import { listSenderIntel, setSenderOverride, baselineReason } from './emailsec/baseline';
 import { geolocate, geoEnabled } from './emailsec/geo';
+import { publicGeoConfig, saveGeoConfig } from './geoConfig';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -247,6 +248,22 @@ export function buildApi() {
     res.json(r);
   });
   api.get('/ai/usage', requirePartner, (_req, res) => res.json(getUsage()));
+
+  // ---- Geolocation provider (partner-wide, for the transport-chain map) ----
+  api.get('/geo/config', requirePartner, (_req, res) => res.json(publicGeoConfig()));
+  api.put('/geo/config', requirePartner, requireTeamAdmin, async (req, res) => {
+    try { await saveGeoConfig({ provider: req.body?.provider, dbPath: req.body?.dbPath }); logReq(req, 'geo.config.update', req.body?.provider); res.json(publicGeoConfig()); }
+    catch (e) { res.status(400).json({ error: (e as Error).message }); }
+  });
+  api.post('/geo/test', requirePartner, async (_req, res) => {
+    if (!geoEnabled()) return res.json({ ok: false, error: 'No geolocation provider configured.' });
+    try {
+      const r = await geolocate(['8.8.8.8']); // Google DNS — a known, stable public IP
+      const g = r['8.8.8.8'];
+      if (!g) return res.json({ ok: false, error: 'Provider configured but returned no location (check the DB path or network).' });
+      res.json({ ok: true, sample: g });
+    } catch (e) { res.json({ ok: false, error: (e as Error).message }); }
+  });
   // Minimal AI status for customers (just whether the AI tier is active — no config).
   api.get('/settings/ai-status', requireAuth, (_req, res) => res.json({ aiActive: publicAiConfig().active }));
 

@@ -6,7 +6,7 @@
 //
 // Results are cached per IP. Any error returns null (no coordinates), never throws.
 
-import { config } from '../config';
+import { getGeoConfig, onGeoConfigChange } from '../geoConfig';
 
 export interface GeoPoint { lat: number; lon: number; city?: string; country?: string }
 const cache = new Map<string, GeoPoint | null>();
@@ -28,10 +28,13 @@ async function viaIpApi(ips: string[]): Promise<Record<string, GeoPoint | null>>
 }
 
 let mmReader: any = null;
+let mmPath = '';
+onGeoConfigChange(() => { mmReader = null; cache.clear(); });
 async function maxmindReader() {
-  if (mmReader) return mmReader;
+  const path = getGeoConfig().dbPath;
+  if (mmReader && mmPath === path) return mmReader;
   const mm: any = await import('maxmind');
-  mmReader = await mm.open(config.geo.dbPath);
+  mmReader = await mm.open(path); mmPath = path;
   return mmReader;
 }
 async function viaMaxmind(ip: string): Promise<GeoPoint | null> {
@@ -40,7 +43,7 @@ async function viaMaxmind(ip: string): Promise<GeoPoint | null> {
   return { lat: r.location.latitude, lon: r.location.longitude, city: r.city?.names?.en, country: r.country?.names?.en };
 }
 
-export function geoEnabled(): boolean { return config.geo.provider !== 'none'; }
+export function geoEnabled(): boolean { return getGeoConfig().provider !== 'none'; }
 
 export async function geolocate(ips: string[]): Promise<Record<string, GeoPoint | null>> {
   const out: Record<string, GeoPoint | null> = {};
@@ -49,12 +52,13 @@ export async function geolocate(ips: string[]): Promise<Record<string, GeoPoint 
     if (isPrivate(ip)) { out[ip] = null; continue; }
     if (cache.has(ip)) out[ip] = cache.get(ip)!; else need.push(ip);
   }
-  if (!need.length || config.geo.provider === 'none') { for (const ip of need) out[ip] = null; return out; }
+  const provider = getGeoConfig().provider;
+  if (!need.length || provider === 'none') { for (const ip of need) out[ip] = null; return out; }
   try {
-    if (config.geo.provider === 'ipapi') {
+    if (provider === 'ipapi') {
       const r = await viaIpApi(need);
       for (const ip of need) { cache.set(ip, r[ip] ?? null); out[ip] = r[ip] ?? null; }
-    } else if (config.geo.provider === 'maxmind') {
+    } else if (provider === 'maxmind') {
       for (const ip of need) { const g = await viaMaxmind(ip).catch(() => null); cache.set(ip, g); out[ip] = g; }
     }
   } catch (e) {

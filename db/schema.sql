@@ -293,3 +293,11 @@ create table if not exists sender_overrides (
 
 -- parsed SMTP transport chain (Received headers)
 alter table messages add column if not exists transport_hops jsonb;
+
+-- partner-wide geolocation provider config (single row)
+create table if not exists geo_config (
+  id         text primary key default 'partner',
+  provider   text not null default 'none',
+  db_path    text,
+  updated_at timestamptz not null default now()
+);

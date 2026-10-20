@@ -1222,9 +1222,9 @@ VIEWS.settings=async function(){
   const r=await api('/settings/config');SET=r.settings;SETSCOPE=r.scope;
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Settings</h1><p>${isPartner?'Partner defaults · applied to new customers':STATE._cust.name+' · customer settings'}</p></div>`));
-  const tabs=(isPartner?['Server','AI Provider']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']).concat(isPartner?[]:['Detection','Domains']);
+  const tabs=(isPartner?['Server','AI Provider','Geolocation']:[]).concat(['General','Billing','Quarantine Digest','Security','Customization','Banners']).concat(isPartner?[]:['Detection','Domains']);
   if(!SETTAB||!tabs.includes(SETTAB))SETTAB=tabs[0];
-  const RENDER={Server:settingsServer,'AI Provider':settingsAI,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners,Detection:settingsDetection,Domains:settingsDomains};
+  const RENDER={Server:settingsServer,'AI Provider':settingsAI,Geolocation:settingsGeo,General:settingsGeneral,Billing:settingsBilling,'Quarantine Digest':settingsDigest,Security:settingsSecurity,Customization:settingsCustomization,Banners:settingsBanners,Detection:settingsDetection,Domains:settingsDomains};
   const wrap=el('<div style="display:flex;gap:20px;align-items:flex-start"></div>');
   const sideNav=el('<div class="card" style="width:220px;flex:none;padding:8px"></div>');
   const body=el('<div style="flex:1;min-width:0"></div>');
@@ -1331,6 +1331,45 @@ async function settingsAI(){
   }
   loadUsage();
   return wrap;
+}
+
+async function settingsGeo(){
+  const cfg=await api('/geo/config');
+  const m={provider:cfg.provider,dbPath:cfg.dbPath||'/opt/breakphish/GeoLite2-City.mmdb'};
+  const c=el('<div class="card p" style="max-width:680px"></div>');
+  const statusPill=cfg.active?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span>':'<span class="pill p-muted">Not configured</span>';
+  c.appendChild(el(`<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h3 style="font-size:15px;flex:1">Geolocation (transport-chain map)</h3>${statusPill}</div>`));
+  c.appendChild(el('<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px">Plots each SMTP hop on a map in the message Transport Chain tab. The chain itself works without this — geolocation only adds the map.</div>'));
+  if(cfg.locked)c.appendChild(el('<div class="card p" style="background:var(--warn-bg);border-left:3px solid var(--warn);margin-bottom:14px;font-size:12.5px">Managed via environment variables (<span class="mono">GEOIP_PROVIDER</span>). The settings below are read-only.</div>'));
+  const body=el('<div></div>');
+  const PROVIDERS=[['none','None (map off)'],['maxmind','MaxMind GeoLite2 (local — private)'],['ipapi','ip-api.com (no key — sends IPs to a third party)']];
+  body.appendChild(sField('Provider',pairSelect(m.provider,PROVIDERS,v=>{m.provider=v;draw();})));
+  const fields=el('<div></div>');body.appendChild(fields);
+  function draw(){
+    fields.innerHTML='';
+    if(m.provider==='maxmind'){
+      fields.appendChild(sField('GeoLite2 database path',sInput(m.dbPath,v=>m.dbPath=v,'/opt/breakphish/GeoLite2-City.mmdb')));
+      fields.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin-top:-6px">Create a free MaxMind account, download <span class="mono">GeoLite2-City.mmdb</span>, and place it on the server at this path. Customer IPs stay local.</div>'));
+    } else if(m.provider==='ipapi'){
+      fields.appendChild(el('<div style="font-size:12px;color:var(--warn);padding:4px 0">ip-api.com requires no key, but each lookup sends the hop IP to ip-api.com. Fine for testing; MaxMind is recommended for production.</div>'));
+    }
+  }
+  draw();c.appendChild(body);
+  const bar=el('<div style="display:flex;gap:10px;align-items:center;margin-top:18px"></div>');
+  const save=el('<button class="btn primary">Save</button>');
+  save.onclick=async()=>{if(cfg.locked){toast('Managed via environment');return;}save.textContent='Saving…';save.disabled=true;
+    try{await api('/geo/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(m)});toast('Geolocation saved');go('settings');}
+    catch(e){toast('Save failed: '+e.message);save.textContent='Save';save.disabled=false;}};
+  const test=el('<button class="btn">⚡ Test</button>');const testOut=el('<div style="font-size:12.5px;margin-left:4px"></div>');
+  test.onclick=async()=>{test.textContent='Testing…';test.disabled=true;testOut.textContent='';
+    try{const r=await api('/geo/test',{method:'POST'});
+      if(r.ok)testOut.innerHTML=`<span class="pill p-ok">OK</span> resolved 8.8.8.8 → ${r.sample.city?r.sample.city+', ':''}${r.sample.country||''} (${r.sample.lat.toFixed(2)}, ${r.sample.lon.toFixed(2)})`;
+      else testOut.innerHTML=`<span class="pill p-danger">Failed</span> <span style="color:var(--muted)">${r.error}</span>`;
+    }catch(e){testOut.innerHTML='<span class="pill p-danger">Failed</span> '+e.message;}
+    test.textContent='⚡ Test';test.disabled=false;};
+  if(!cfg.locked)bar.appendChild(save);bar.appendChild(test);bar.appendChild(testOut);
+  c.appendChild(bar);
+  return c;
 }
 
 async function settingsGeneral(){

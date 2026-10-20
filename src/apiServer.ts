@@ -17,6 +17,7 @@ import { hydrateSettings } from './settings';
 import { hydratePolicy } from './policy';
 import { hydrateTeam } from './team';
 import { hydrateAiConfig } from './aiConfig';
+import { hydrateGeoConfig } from './geoConfig';
 import { hydrateAiUsage } from './aiUsage';
 import { hydrateBaseline, hydrateSenderOverrides } from './emailsec/baseline';
 import { hydrateAudit } from './audit';
@@ -77,6 +78,7 @@ async function main() {
       await hydrateTeam();
       await hydrateAudit();
       await hydrateAiConfig();
+      await hydrateGeoConfig();
       await hydrateAiUsage();
       await hydrateSenderOverrides();
       const baseN = hydrateBaseline();
