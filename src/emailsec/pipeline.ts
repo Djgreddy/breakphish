@@ -11,7 +11,7 @@ import { domainAgeDays } from './domainAge';
 import { classifyIntent, llmEnabled } from './llm';
 import { recordScored } from '../aiUsage';
 import { makeClassifier } from './classifier';
-import { dispositionFor, resolveTemplate } from '../policy';
+import { dispositionFor, resolveTemplate, detectionFlags } from '../policy';
 import { getSettings } from '../settings';
 import { emailStore } from './store';
 import { persistScored } from '../db/hydrate';
@@ -97,8 +97,9 @@ export async function analyze(message: Message): Promise<Analysis> {
   let scores = trustDiscount(adjustSpamSensitivity(aggregate(signals), message.tenantId), message);
   let { verdict, confidence } = decideVerdict(scores);
 
-  // Newly-registered domain check — only for first-contact external senders (cached).
-  if (message.direction === 'inbound' && message.source === 'external') {
+  // Newly-registered domain check — only for first-contact external senders (cached),
+  // and only when the customer's policy has it enabled.
+  if (message.direction === 'inbound' && message.source === 'external' && detectionFlags(message.tenantId).newDomain) {
     const st = senderStat(message.tenantId, message.fromAddress);
     if (!st || st.inbound === 0) {
       const days = await domainAgeDays(message.fromAddress.split('@')[1] ?? '');

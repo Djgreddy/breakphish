@@ -930,6 +930,7 @@ async function polTemplates(){
 function openTemplateEditor(t){
   const isNew=!t; const editable=isNew||t.editable;
   const d=t?structuredClone(t.data):{verdictActions:{Clean:'deliver',Impersonation:'quarantine',Infomail:'quarantine',Malware:'quarantine',Phishing:'quarantine','Spam-Definite':'quarantine','Spam-High':'quarantine','Spam-Likely':'quarantine'},authActions:{dmarcFail:'sender_dmarc_policy',spfFail:'reject',spfNone:'no_action'},attachments:{types:['Executable'],action:'quarantine'},geo:{countries:[],action:'quarantine'},advanced:{coldOutreach:false,zeroTrust:false,spamSensitivity:'Medium'}};
+  if(!d.advanced.detections)d.advanced.detections={newDomain:true,linkHeuristics:true,contentIntent:true,authAlignment:true};
   const model={name:t?t.name:'',comment:t?t.comment:'',deployment:t?t.deployment:'BreakPhish 365',data:d,isDefault:t?t.isDefault:false};
   const modal=el(`<div class="modal wide" style="max-width:760px"><div class="modal-h"><h2>${isNew?'New template':(editable?'Edit template':'View template')}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="tb" style="max-height:70vh;overflow:auto"></div></div>`);
   showModal(modal);const b=modal.querySelector('#tb');
@@ -961,6 +962,15 @@ function openTemplateEditor(t){
   adv('Cold Outreach',model.data.advanced.coldOutreach,v=>model.data.advanced.coldOutreach=v);
   adv('Zero Trust',model.data.advanced.zeroTrust,v=>model.data.advanced.zeroTrust=v);
   b.appendChild(sField('Spam filtering sensitivity',sSelect(model.data.advanced.spamSensitivity,['Low','Medium','High'],v=>model.data.advanced.spamSensitivity=v)));
+  // Advanced Detection toggles — each can be disabled per customer to tame false positives.
+  b.appendChild(sec('Advanced detection'));
+  b.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin-bottom:6px">These behavioral detectors are on by default. Turn one off for a customer if it causes false positives (core identity, malware and lookalike detection always stay on).</div>'));
+  const det=model.data.advanced.detections;
+  const advDet=(label,desc,key)=>{const r=el(`<div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--line2)"><div style="flex:1"><div style="font-weight:600;font-size:13.5px">${label}</div><div style="font-size:11.5px;color:var(--faint)">${desc}</div></div></div>`);const tg=makeToggle(det[key]!==false);tg.onclick=(()=>{const o=tg.onclick;return()=>{o&&o();det[key]=tg._get();};})();r.appendChild(tg);b.appendChild(r);};
+  advDet('Newly-registered domains','Flag senders on domains registered very recently (can false-positive on legit new/rebranded domains)','newDomain');
+  advDet('Link / URL heuristics','Lookalike links, shorteners, brand-impersonation URLs, link-text mismatch','linkHeuristics');
+  advDet('Content & intent analysis','BEC/urgency/payment language, credential lures, thread-hijacking','contentIntent');
+  advDet('Authentication alignment (DMARC)','Flag mail that passes SPF/DKIM but fails DMARC alignment (can affect forwarders/mailing lists)','authAlignment');
   const defRow=el('<div style="display:flex;align-items:center;gap:14px;padding:10px 0"><div style="flex:1;font-size:13.5px;font-weight:500">Set as default (applied to new mail for this scope)</div></div>');const dtg=makeToggle(model.isDefault);dtg.onclick=(()=>{const o=dtg.onclick;return()=>{o&&o();model.isDefault=dtg._get();};})();defRow.appendChild(dtg);b.appendChild(defRow);
   const foot=el('<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)"></div>');
   foot.appendChild(el('<button class="btn" onclick="closeModal()">Cancel</button>'));

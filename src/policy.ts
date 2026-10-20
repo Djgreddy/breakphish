@@ -24,8 +24,14 @@ export interface PolicyTemplateData {
   authActions: { dmarcFail: AuthAction; spfFail: AuthAction; spfNone: AuthAction };
   attachments: { types: string[]; action: Action };
   geo: { countries: string[]; action: Action };
-  advanced: { coldOutreach: boolean; zeroTrust: boolean; spamSensitivity: string };
+  advanced: {
+    coldOutreach: boolean; zeroTrust: boolean; spamSensitivity: string;
+    detections?: { newDomain: boolean; linkHeuristics: boolean; contentIntent: boolean; authAlignment: boolean };
+  };
 }
+
+export interface DetectionFlags { newDomain: boolean; linkHeuristics: boolean; contentIntent: boolean; authAlignment: boolean }
+export const DEFAULT_DETECTIONS: DetectionFlags = { newDomain: true, linkHeuristics: true, contentIntent: true, authAlignment: true };
 export interface PolicyTemplate {
   id: string; scope: string; name: string; comment: string; deployment: string;
   data: PolicyTemplateData; isDefault: boolean; createdBy: string; createdAt: string;
@@ -43,8 +49,14 @@ export const DEFAULT_TEMPLATE_DATA: PolicyTemplateData = {
   authActions: { dmarcFail: 'sender_dmarc_policy', spfFail: 'reject', spfNone: 'no_action' },
   attachments: { types: ['Executable'], action: 'quarantine' },
   geo: { countries: [], action: 'quarantine' },
-  advanced: { coldOutreach: false, zeroTrust: false, spamSensitivity: 'Medium' },
+  advanced: { coldOutreach: false, zeroTrust: false, spamSensitivity: 'Medium', detections: { newDomain: true, linkHeuristics: true, contentIntent: true, authAlignment: true } },
 };
+
+// Resolve the active template's advanced-detection toggles for a tenant.
+export function detectionFlags(tenantId: string): DetectionFlags {
+  const d = resolveTemplate(tenantId).advanced?.detections;
+  return { ...DEFAULT_DETECTIONS, ...(d ?? {}) };
+}
 
 const templates = new Map<string, PolicyTemplate>();
 const rules = new Map<string, PolicyRule>();

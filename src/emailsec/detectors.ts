@@ -8,6 +8,7 @@
 import type { Message, Signal } from './types';
 import { store } from '../store';
 import { senderStat } from './baseline';
+import { detectionFlags } from '../policy';
 
 const COMMON_BRANDS = [
   'microsoft.com', 'office365.com', 'outlook.com', 'live.com', 'google.com', 'gmail.com',
@@ -115,6 +116,7 @@ function registrable(host: string): string { const p = host.split('.'); return p
 // combination; strong signals (lookalike / mismatch / IP) score high on their own.
 export function urlScorer(m: Message): Signal[] {
   if (m.direction !== 'inbound' || m.source !== 'external') return [];
+  if (!detectionFlags(m.tenantId).linkHeuristics) return [];
   const out: Signal[] = [];
   const own = (store.getTenant(m.tenantId)?.verifiedDomains ?? []).map(d => d.toLowerCase());
   const hosts = (m.urls ?? []).map(urlHost).filter(Boolean);
@@ -176,8 +178,11 @@ export function authDepthScorer(m: Message): Signal[] {
   if (own.includes(fromDom) && m.auth.dmarc !== 'pass') {
     return [{ code: 'own_domain_spoof', detail: `Message claims to be from your domain (${fromDom}) but failed authentication — likely spoofing`, category: 'impersonation', weight: 60 }];
   }
-  // Passed SPF/DKIM but failed DMARC → the authenticated domain doesn't align with the From header.
-  if ((m.auth.spf === 'pass' || m.auth.dkim === 'pass') && m.auth.dmarc === 'fail') {
+  // Passed SPF/DKIM but failed DMARC → the authenticated domain doesn't align with
+  // the From header. (This is the FP-prone part — some legit senders/forwarders
+  // break DMARC — so it respects the authAlignment toggle. Own-domain spoofing
+  // above is always on.)
+  if (detectionFlags(m.tenantId).authAlignment && (m.auth.spf === 'pass' || m.auth.dkim === 'pass') && m.auth.dmarc === 'fail') {
     return [{ code: 'dmarc_alignment', detail: `Passed SPF/DKIM but failed DMARC — the authenticated domain doesn't match the From address (possible spoofing)`, category: 'phishing', weight: 38 }];
   }
   return [];
@@ -191,6 +196,7 @@ const has = (text: string, list: string[]) => list.some(k => text.includes(k));
 // Content & structure: intent language + thread-hijacking.
 export function contentStructureScorer(m: Message): Signal[] {
   if (m.direction !== 'inbound') return [];
+  if (!detectionFlags(m.tenantId).contentIntent) return [];
   const text = ((m.subject ?? '') + ' ' + (m.bodyText ?? '')).toLowerCase();
   const out: Signal[] = [];
   const urgency = has(text, URGENCY), payment = has(text, PAYMENT), credential = has(text, CREDENTIAL);
