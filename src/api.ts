@@ -28,6 +28,7 @@ import { publicAiConfig, saveAiConfig } from './aiConfig';
 import { testLlm } from './emailsec/llm';
 import { getUsage } from './aiUsage';
 import { listSenderIntel, setSenderOverride, baselineReason } from './emailsec/baseline';
+import { geolocate, geoEnabled } from './emailsec/geo';
 import { listTemplates, saveTemplate, deleteTemplate, listRules, saveRule, deleteRule, ruleTargetsAll, isDisabledFor, setRuleOverride, matchingRule } from './policy';
 import { config } from './config';
 import { healthSnapshot } from './health';
@@ -541,10 +542,20 @@ export function buildApi() {
     res.json({ rows: slice, total, page, pages: Math.ceil(total / per) || 1 });
   });
 
-  api.get('/customers/:id/messages/:mid', (req, res) => {
+  api.get('/customers/:id/messages/:mid', async (req, res) => {
     const m = emailStore.messages.get(req.params.mid);
     const a = emailStore.analysisFor(req.params.mid);
     if (!m || !a) return res.status(404).json({ error: 'not found' });
+    // geolocate transport hops for the map (fail-open; cached)
+    let hops: any[] = m.transportHops ?? [];
+    let geoEnabledFlag = false;
+    if (geoEnabled() && hops.length) {
+      try {
+        const geo = await geolocate(hops.map(h => h.ip).filter(Boolean));
+        hops = hops.map(h => ({ ...h, geo: geo[h.ip] ?? null }));
+        geoEnabledFlag = true;
+      } catch { /* fail open */ }
+    }
     // Lightweight event log derived from what we know.
     const events = [
       { at: m.receivedAt, event: 'Content analysis' },
@@ -556,7 +567,7 @@ export function buildApi() {
     const context = a.verdict === 'clean' ? 'Clean' : (top ? (CTX[top.category] ?? top.category) : CTX[a.verdict] ?? '—');
     const rule = matchingRule(m.tenantId, m.fromAddress);
     const enrich = { queueId: m.id, senderIp: m.senderIp || '', country: m.senderCountry || '', msVerdict: m.msVerdict || '', context, rules: rule ? rule.label : '', senderIntel: baselineReason(m.tenantId, m.fromAddress), spamScore: Math.round(((a.signals ?? []).reduce((s: number, x: any) => s + (x.weight ?? 0), 0) / 14) * 100) / 100 };
-    res.json({ message: m, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich });
+    res.json({ message: { ...m, transportHops: hops }, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich, geoEnabled: geoEnabledFlag });
   });
 
   // Remediate a delivered message now: move it to quarantine and mark it.

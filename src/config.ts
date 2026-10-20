@@ -30,6 +30,14 @@ export const config = {
     azureApiVersion: process.env.LLM_AZURE_API_VERSION ?? '2024-06-01',
   },
 
+  // IP geolocation for the email transport-chain map. 'maxmind' reads a local
+  // GeoLite2-City.mmdb (private, recommended); 'ipapi' calls ip-api.com (sends IPs
+  // to a third party); 'none' (default) disables the map and shows the hop list.
+  geo: {
+    provider: (process.env.GEOIP_PROVIDER ?? 'none') as 'none' | 'maxmind' | 'ipapi',
+    dbPath: process.env.GEOIP_DB ?? '/opt/breakphish/GeoLite2-City.mmdb',
+  },
+
   // Microsoft Graph multi-tenant app (only used when directoryProvider = 'graph').
   graph: {
     clientId: process.env.GRAPH_CLIENT_ID ?? '00000000-0000-0000-0000-000000000000',
