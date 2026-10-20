@@ -58,6 +58,7 @@ export interface Message {
   senderDomainAgeDays: number;
   firstTimeSender: boolean;
   urls: string[];
+  linkMismatch?: boolean;
   attachments: Attachment[];
 }
 

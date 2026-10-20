@@ -638,6 +638,28 @@ export function buildApi() {
     } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
 
+  // Report a false positive: deliver the message AND allow-list the sender so it
+  // never false-flags again. scope: 'recipient' (this customer) | 'org' (partner-wide)
+  api.post('/customers/:id/messages/:mid/false-positive', requireAuth, requireCustomerAccess, async (req, res) => {
+    try {
+      const id = req.params.id, mid = req.params.mid;
+      const m = emailStore.messages.get(mid); const a = emailStore.analysisFor(mid);
+      if (!m || !a) return res.status(404).json({ error: 'not found' });
+      // deliver (release)
+      a.disposition = 'deliver'; a.remediated = false; a.releasedManually = true;
+      emailStore.saveAnalysis(a); await persistScored(m, a);
+      emailStore.markReleased(m.internetMessageId);
+      if (m.internetMessageId) { try { await (await import('./db/persist')).markReleasedRow(m.internetMessageId, id); } catch {} }
+      const { conn, user } = mailboxFor(id, m);
+      if (conn?.entraTenantId && user) { try { await (await import('./emailsec/mailActions')).makeMailActions().moveToInbox(conn.entraTenantId, user.externalId, { graphId: mid, internetMessageId: m.internetMessageId }); } catch (e) { console.error('[fp] move failed', (e as Error).message); } }
+      // allow-list the sender
+      const scope = (req.body?.scope ?? req.body?.option) === 'org' ? 'partner' : id;
+      await saveRule({ scope, kind: 'allow', data: { sender: m.fromAddress, comment: `Allowed — reported false positive (${m.subject})` } });
+      logReq(req, 'mail.false_positive', m.subject, `from ${m.fromAddress} (allow ${scope === 'partner' ? 'org' : 'recipient'})`, id);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: (e as Error).message }); }
+  });
+
   // Delete a held message. option: 'plain' | 'block_recipient' | 'block_org'
   api.post('/customers/:id/messages/:mid/delete', requireAuth, requireCustomerAccess, async (req, res) => {
     try {

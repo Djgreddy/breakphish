@@ -64,6 +64,25 @@ function msEnrichment(headers: Array<{ name: string; value: string }> = []) {
   return { senderIp: cip ?? xorig ?? '', msVerdict, country };
 }
 
+// Detect <a href="X">TEXT</a> where TEXT shows one domain but href goes elsewhere.
+function hasLinkMismatch(html: string): boolean {
+  if (!html) return false;
+  const re = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const href = m[1];
+    const text = m[2].replace(/<[^>]+>/g, ' ').trim();
+    const textDom = (text.match(/(?:[a-z0-9-]+\.)+[a-z]{2,}/i) ?? [])[0];
+    if (!textDom || !/^https?:/i.test(href)) continue;
+    try {
+      const hd = new URL(href).hostname.toLowerCase().replace(/^www\./, '');
+      const td = textDom.toLowerCase().replace(/^www\./, '');
+      if (hd && td && !hd.endsWith(td) && !td.endsWith(hd)) return true;
+    } catch { /* ignore */ }
+  }
+  return false;
+}
+
 function stripHtml(s: string): string {
   return (s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
 }
@@ -83,6 +102,7 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
   // Internal = stays inside the org (both ends verified). Otherwise external.
   const source: 'internal' | 'external' = internalSender && internalRecipient ? 'internal' : 'external';
   const bodyText = m.body?.contentType === 'html' ? stripHtml(m.body?.content) : (m.body?.content ?? m.bodyPreview ?? '');
+  const linkMismatch = m.body?.contentType === 'html' ? hasLinkMismatch(m.body?.content ?? '') : false;
   const ms = msEnrichment(m.internetMessageHeaders);
   return {
     id: m.id,
@@ -106,6 +126,7 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
     senderDomainAgeDays: 3000,
     firstTimeSender: false,
     urls: extractUrls(bodyText),
+    linkMismatch,
     attachments: (m.attachments ?? []).map((a: any) => ({ filename: a.name, contentType: a.contentType })),
   };
 }

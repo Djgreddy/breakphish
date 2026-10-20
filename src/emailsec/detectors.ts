@@ -104,6 +104,68 @@ export function replyToMismatchScorer(m: Message): Signal[] {
   return [];
 }
 
+const SHORTENERS = ['bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'ow.ly', 'is.gd', 'buff.ly', 'rebrand.ly', 'cutt.ly', 'rb.gy', 'shorturl.at', 'tiny.cc'];
+const BRAND_WORDS = ['microsoft', 'office365', 'outlook', 'onedrive', 'sharepoint', 'google', 'paypal', 'amazon', 'apple', 'docusign', 'netflix', 'chase', 'wellsfargo', 'bankofamerica', 'dropbox', 'adobe'];
+
+function urlHost(u: string): string { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; } }
+function registrable(host: string): string { const p = host.split('.'); return p.length >= 2 ? p.slice(-2).join('.') : host; }
+
+// URL / link analysis. Weak signals (shorteners) score low so they only matter in
+// combination; strong signals (lookalike / mismatch / IP) score high on their own.
+export function urlScorer(m: Message): Signal[] {
+  if (m.direction !== 'inbound' || m.source !== 'external') return [];
+  const out: Signal[] = [];
+  const own = (store.getTenant(m.tenantId)?.verifiedDomains ?? []).map(d => d.toLowerCase());
+  const hosts = (m.urls ?? []).map(urlHost).filter(Boolean);
+  const seen = new Set<string>();
+  for (const host of hosts) {
+    if (seen.has(host)) continue; seen.add(host);
+    const reg = registrable(host);
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) { out.push({ code: 'url_ip', detail: `Link points to a raw IP address (${host})`, category: 'phishing', weight: 35 }); continue; }
+    if (host.split('.').some(l => l.startsWith('xn--'))) { out.push({ code: 'url_punycode', detail: `Link uses a punycode/IDN domain (${host})`, category: 'phishing', weight: 40 }); continue; }
+    if (SHORTENERS.includes(reg)) { out.push({ code: 'url_shortener', detail: `Link uses a URL shortener (${reg}) that hides its destination`, category: 'spam', weight: 8 }); continue; }
+    // lookalike of a tenant/brand domain
+    const nd = normalize(host);
+    for (const t of [...own, ...COMMON_BRANDS]) {
+      if (reg === t) break;
+      const dist = levenshtein(nd, normalize(t));
+      if ((dist === 0 || (dist <= 2 && normalize(t).length >= 6)) && reg !== t) { out.push({ code: 'url_lookalike', detail: `Link domain "${host}" resembles "${t}"`, category: 'phishing', weight: 40 }); break; }
+    }
+    // brand word appears in the host (even homoglyphed) but the registrable domain
+    // isn't that brand — e.g. paypal.secure-login.ru, micros0ft-login.com
+    const nhost = normalize(host);
+    const brand = BRAND_WORDS.find(b => nhost.includes(b));
+    if (brand && !COMMON_BRANDS.some(cb => reg === cb)) out.push({ code: 'url_brand_impersonation', detail: `Link host impersonates "${brand}" but isn't an official domain (${host})`, category: 'phishing', weight: 35 });
+  }
+  if (m.linkMismatch) out.push({ code: 'link_text_mismatch', detail: 'A link’s visible text points to a different domain than its actual destination', category: 'phishing', weight: 45 });
+  return out;
+}
+
+const SCRIPT_EXT = ['.js', '.vbs', '.ps1', '.hta', '.wsf', '.jse', '.vbe'];
+const EXEC_EXT2 = ['.exe', '.scr', '.com', '.pif', '.msi', '.jar', '.bat', '.cmd', '.app'];
+const MACRO_EXT = ['.docm', '.xlsm', '.pptm', '.dotm', '.xlam'];
+const ARCHIVE_EXT = ['.zip', '.rar', '.7z', '.iso', '.img', '.cab', '.gz'];
+const ext = (f: string) => { const i = f.lastIndexOf('.'); return i < 0 ? '' : f.slice(i).toLowerCase(); };
+
+// Attachment depth. Double extensions and scripts/executables are strong; macro
+// docs and HTML are medium; archives are weak (can't inspect contents).
+export function attachmentScorer(m: Message): Signal[] {
+  const out: Signal[] = [];
+  for (const a of m.attachments ?? []) {
+    const f = (a.filename ?? '').toLowerCase();
+    const e = ext(f);
+    const parts = f.split('.');
+    const doubleExec = parts.length >= 3 && [...EXEC_EXT2, ...SCRIPT_EXT].includes('.' + parts[parts.length - 1]) && ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'jpg', 'png', 'txt', 'invoice'].includes(parts[parts.length - 2]);
+    if (doubleExec) { out.push({ code: 'att_double_ext', detail: `Attachment "${a.filename}" uses a deceptive double extension`, category: 'malware', weight: 55 }); continue; }
+    if (EXEC_EXT2.includes(e)) out.push({ code: 'att_executable', detail: `Executable attachment "${a.filename}"`, category: 'malware', weight: 50 });
+    else if (SCRIPT_EXT.includes(e)) out.push({ code: 'att_script', detail: `Script attachment "${a.filename}"`, category: 'malware', weight: 45 });
+    else if (MACRO_EXT.includes(e)) out.push({ code: 'att_macro', detail: `Macro-enabled Office attachment "${a.filename}"`, category: 'malware', weight: 28 });
+    else if (e === '.html' || e === '.htm') out.push({ code: 'att_html', detail: `HTML attachment "${a.filename}" (possible HTML-smuggling phishing)`, category: 'phishing', weight: 22 });
+    else if (ARCHIVE_EXT.includes(e)) out.push({ code: 'att_archive', detail: `Archive attachment "${a.filename}" (contents can't be inspected)`, category: 'spam', weight: 12 });
+  }
+  return out;
+}
+
 export function runDetectors(m: Message): Signal[] {
-  return [...lookalikeDomainScorer(m), ...directoryImpersonationScorer(m), ...punycodeScorer(m), ...replyToMismatchScorer(m)];
+  return [...lookalikeDomainScorer(m), ...directoryImpersonationScorer(m), ...punycodeScorer(m), ...replyToMismatchScorer(m), ...urlScorer(m), ...attachmentScorer(m)];
 }
