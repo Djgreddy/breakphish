@@ -43,6 +43,7 @@ export interface Message {
   senderIp?: string;               // connecting IP (from Microsoft headers)
   msVerdict?: string;              // Microsoft's own spam verdict (SFV/BCL)
   senderCountry?: string;          // sender country (from Microsoft headers)
+  transportHops?: { index: number; from: string; by: string; ip: string; at: string | null }[];
   tenantId: string;
   direction: Direction;
   source: 'external' | 'internal';

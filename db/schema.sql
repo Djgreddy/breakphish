@@ -290,3 +290,6 @@ create table if not exists sender_overrides (
   updated_at  timestamptz not null default now(),
   primary key (customer_id, sender)
 );
+
+-- parsed SMTP transport chain (Received headers)
+alter table messages add column if not exists transport_hops jsonb;

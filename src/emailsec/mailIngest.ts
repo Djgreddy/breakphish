@@ -83,6 +83,23 @@ function hasLinkMismatch(html: string): boolean {
   return false;
 }
 
+// Parse the SMTP transport chain from Received: headers (origin → recipient).
+export interface TransportHop { index: number; from: string; by: string; ip: string; at: string | null }
+function parseTransport(headers: Array<{ name: string; value: string }> = []): TransportHop[] {
+  const received = headers.filter(h => h.name.toLowerCase() === 'received').map(h => h.value);
+  // Headers appear most-recent-first; reverse so hop 1 is the origin.
+  return received.reverse().map((v, i) => {
+    const fromM = /from\s+([^\s(;]+)(?:\s*\(([^)]*)\))?/i.exec(v);
+    const byM = /by\s+([^\s(;]+)/i.exec(v);
+    const ipSrc = (fromM?.[2] ?? '') + ' ' + v;
+    const ipM = /\[?((?:\d{1,3}\.){3}\d{1,3})\]?/.exec(ipSrc) ?? /\[((?:[0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F]{0,4})\]/.exec(ipSrc);
+    const dateM = /;\s*([^;]+)$/.exec(v);
+    let at: string | null = null;
+    if (dateM) { const d = Date.parse(dateM[1].trim()); if (!Number.isNaN(d)) at = new Date(d).toISOString(); }
+    return { index: i + 1, from: (fromM?.[1] ?? '').toLowerCase(), by: (byM?.[1] ?? '').toLowerCase(), ip: ipM?.[1] ?? '', at };
+  });
+}
+
 function stripHtml(s: string): string {
   return (s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
 }
@@ -111,6 +128,7 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
     senderIp: ms.senderIp,
     msVerdict: ms.msVerdict,
     senderCountry: ms.country,
+    transportHops: parseTransport(m.internetMessageHeaders),
     direction: outbound ? 'outbound' : (internalSender ? 'internal' : 'inbound'),
     source,
     fromAddress,

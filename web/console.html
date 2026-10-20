@@ -478,7 +478,26 @@ async function openMessage(id){
       ${kv('Signals',(a.signals||[]).length?(a.signals.map(s=>`<div class="sig" style="padding:6px 0"><div class="ic ${toneCls[s.category]||'p-muted'}">!</div><div class="st"><b>${s.detail}</b><span style="color:var(--muted);font-size:12px">${s.code}</span></div><div class="w">+${s.weight}</div></div>`).join('')):'No risk signals.')}</div>`,
     'Preview':()=>{const held=['quarantine','remediated'].includes(a.disposition);return held&&m.bodyText?`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Email body</div><div style="border:1px solid var(--line2);border-radius:10px;padding:14px;font-size:13px;white-space:pre-wrap;color:var(--txt);max-height:46vh;overflow:auto">${(m.bodyText||'').replace(/</g,'&lt;')}</div>`:`<div style="padding:16px;color:var(--warn);font-size:13px">No preview available. Preview is only shown for quarantined mail; clean and delivered mail content is not stored.</div>`;},
     'Event Log':()=>`<div style="border:1px solid var(--line2);border-radius:10px;overflow:hidden"><div style="display:grid;grid-template-columns:200px 1fr;gap:12px;padding:9px 14px;border-bottom:1px solid var(--line2);font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em"><div>Timestamp</div><div>Event</div></div>${(d.events||[]).map(e=>`<div style="display:grid;grid-template-columns:200px 1fr;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line2)"><div class="mono" style="color:var(--muted)">${new Date(e.at).toLocaleString()}</div><div><span style="color:var(--ok)">●</span> ${e.event}</div></div>`).join('')}</div>`,
+    'Transport Chain':()=>{
+      const hops=m.transportHops||[];
+      if(!hops.length)return '<div style="padding:16px;color:var(--warn);font-size:13px">No transport chain available. Received-header data is captured on newly scanned mail — re-scan to populate.</div>';
+      const rows=hops.map((h,i)=>{
+        const prev=hops[i-1];let delay='';
+        if(prev&&prev.at&&h.at){const s=Math.round((Date.parse(h.at)-Date.parse(prev.at))/1000);if(s>=0)delay=s<60?s+'s':Math.round(s/60)+'m';}
+        const country=(h.ip&&en.senderIp&&h.ip===en.senderIp&&en.country)?` · ${en.country}`:'';
+        return `<div style="display:flex;gap:12px;padding:12px 0;${i<hops.length-1?'border-bottom:1px solid var(--line2)':''}">
+          <div style="flex:none;width:26px;height:26px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700">${h.index}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis">${esc(h.from||h.by||'unknown host')}</div>
+            <div style="font-size:12px;color:var(--muted)">${h.ip?`<span class="mono">${h.ip}</span>${country}`:'no IP'}${h.by&&h.from?` → handed to <span class="mono">${esc(h.by)}</span>`:''}</div>
+            ${h.at?`<div style="font-size:11px;color:var(--faint)">${new Date(h.at).toLocaleString()}${delay?` · +${delay}`:''}</div>`:''}
+          </div>
+        </div>`;
+      }).join('');
+      return `<div style="font-size:11px;color:var(--faint);margin-bottom:10px">The SMTP servers this message passed through, from origin (1) to your mailbox.</div><div style="border:1px solid var(--line2);border-radius:10px;padding:4px 16px">${rows}</div>`;
+    },
   };
+  function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
   let tab='Email Details';
   const held=['quarantine','remediated'].includes(a.disposition);
   const modal=el(`<div class="modal" style="width:760px;max-width:94vw;height:78vh;display:flex;flex-direction:column"><div class="modal-h"><h2 style="flex:1">View</h2><button class="modal-x" onclick="closeModal()">✕</button></div>
