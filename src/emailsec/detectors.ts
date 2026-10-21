@@ -172,6 +172,7 @@ export function attachmentScorer(m: Message): Signal[] {
 // Authentication depth: alignment, not just pass/fail.
 export function authDepthScorer(m: Message): Signal[] {
   if (m.direction !== 'inbound' || m.source !== 'external') return [];
+  if (m.auth.compauth === 'pass') return []; // Microsoft composite-authenticated — legit despite mechanism fails
   const fromDom = domainOf(m.fromAddress);
   const own = (store.getTenant(m.tenantId)?.verifiedDomains ?? []).map(d => d.toLowerCase());
   // Someone sending AS your own domain, from outside, without passing DMARC — spoofing you.

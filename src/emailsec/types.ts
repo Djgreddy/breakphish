@@ -55,7 +55,7 @@ export interface Message {
   bodyText: string;
   receivedAt: string;
   // Signals a real pipeline derives from headers / intel; pre-computed here.
-  auth: { spf: 'pass' | 'fail' | 'none'; dkim: 'pass' | 'fail' | 'none'; dmarc: 'pass' | 'fail' | 'none' };
+  auth: { spf: 'pass' | 'fail' | 'none'; dkim: 'pass' | 'fail' | 'none'; dmarc: 'pass' | 'fail' | 'none'; compauth?: 'pass' | 'fail' | 'softpass' | 'none' };
   replyTo?: string;
   senderDomainAgeDays: number;
   firstTimeSender: boolean;

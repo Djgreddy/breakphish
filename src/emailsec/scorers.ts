@@ -12,6 +12,9 @@ const MALWARE_EXTS = ['.exe', '.zip', '.iso', '.html', '.htm', '.js', '.scr'];
 
 export function authScorer(m: Message): Signal[] {
   const out: Signal[] = [];
+  // Microsoft composite auth passed → sender is legitimate even if raw SPF/DKIM/DMARC
+  // fail (forwarded / relayed / mailing-list mail). Don't penalize the mechanism fails.
+  if (m.auth.compauth === 'pass') return out;
   if (m.auth.dmarc === 'fail') {
     out.push({ code: 'dmarc_fail', detail: 'DMARC alignment failed', category: 'phishing', weight: 35 });
   }

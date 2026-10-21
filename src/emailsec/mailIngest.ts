@@ -38,12 +38,18 @@ async function maybeStampBanner(tenantId: string, entraTenantId: string, userId:
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 
-// Graph's internetMessageHeaders include Authentication-Results; parse SPF/DKIM/DMARC.
+// Parse SPF/DKIM/DMARC from Authentication-Results. There can be SEVERAL of these
+// headers (each hop adds one); Microsoft's own result carries compauth= and is the
+// authoritative one — prefer it. compauth is Microsoft's COMPOSITE authentication:
+// compauth=pass means the sender is legitimate even when raw SPF/DKIM/DMARC fail,
+// which is normal for forwarded / relayed / mailing-list mail.
 function authFromHeaders(headers: Array<{ name: string; value: string }> = []) {
-  const ar = headers.find(h => h.name.toLowerCase() === 'authentication-results')?.value?.toLowerCase() ?? '';
+  const ars = headers.filter(h => h.name.toLowerCase() === 'authentication-results').map(h => (h.value || '').toLowerCase());
+  const ar = ars.find(a => a.includes('compauth=')) ?? ars[0] ?? '';
   const read = (k: string): 'pass' | 'fail' | 'none' =>
     ar.includes(`${k}=pass`) ? 'pass' : ar.includes(`${k}=fail`) ? 'fail' : 'none';
-  return { spf: read('spf'), dkim: read('dkim'), dmarc: read('dmarc') };
+  const compauth = (/compauth=([a-z]+)/.exec(ar)?.[1] ?? 'none') as 'pass' | 'fail' | 'softpass' | 'none';
+  return { spf: read('spf'), dkim: read('dkim'), dmarc: read('dmarc'), compauth };
 }
 
 // Microsoft stamps its own result in X-Forefront-Antispam-Report (CIP = connecting

@@ -30,7 +30,7 @@ function userPrompt(m: Message): string {
   return `From: ${m.fromDisplay} <${m.fromAddress}>
 To: ${m.to}
 Subject: ${m.subject}
-Auth: SPF=${m.auth.spf} DKIM=${m.auth.dkim} DMARC=${m.auth.dmarc}
+Auth: SPF=${m.auth.spf} DKIM=${m.auth.dkim} DMARC=${m.auth.dmarc}${m.auth.compauth && m.auth.compauth !== 'none' ? ` CompositeAuth=${m.auth.compauth} (Microsoft's verdict; pass means legitimate even if SPF/DKIM/DMARC fail, e.g. forwarded mail)` : ''}
 
 ${body}`;
 }
