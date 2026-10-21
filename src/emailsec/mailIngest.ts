@@ -211,6 +211,10 @@ async function scoreIngested(tenantId: string, entraTenantId: string, verifiedDo
   {
     const msg = normalize(tenantId, verifiedDomains, m, folder);
     msg.mailboxUserId = userId;
+    // For inbound mail, the actual recipient of THIS copy is the mailbox it landed in.
+    // Mail to a distribution group lists the group in the To header, but each member
+    // gets their own copy — show the member (like Mesh), not the group address.
+    if (folder === 'inbox' && userId) { msg.toHeader = msg.to; msg.to = userId; }
     const analysis = await analyze(msg);
     const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
     const active = isActive(tenantId); // passive (monitor) customers are scored but not acted on
@@ -259,6 +263,7 @@ export async function ingestOneMessage(tenantId: string, entraTenantId: string, 
   const internalDomains = [...t.verifiedDomains, ...getSettings(tenantId).managedDomains];
   const msg = normalize(tenantId, internalDomains, m, 'inbox');
   msg.mailboxUserId = mailbox;
+  if (mailbox) { msg.toHeader = msg.to; msg.to = mailbox; } // actual recipient mailbox (distro groups)
   const analysis = await analyze(msg);
   const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
   if (isActive(tenantId)) { // passive customers are scored but not acted on

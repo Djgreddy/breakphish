@@ -212,10 +212,13 @@ export function contentStructureScorer(m: Message): Signal[] {
     out.push({ code: 'credential_lure', detail: authed ? 'Account/security language (sender is DMARC-authenticated)' : 'Message asks you to verify credentials or account', category: 'phishing', weight: authed ? 6 : 30 });
   }
   else if (urgency) out.push({ code: 'urgency', detail: 'Urgency / pressure language', category: 'spam', weight: 10 });
-  // Thread hijacking: a Re:/Fwd: from someone we've never heard from.
+  // Thread hijacking: a Re:/Fwd: from a sender we've NEVER corresponded with — in
+  // EITHER direction. If we emailed them first (e.g. a helpdesk ticket), their reply
+  // with "Re:" is expected and legitimate, not a hijack.
   if (/^\s*(re|fwd?|aw|wg)\s*:/i.test(m.subject ?? '') && m.source === 'external') {
     const st = senderStat(m.tenantId, m.fromAddress);
-    if (!st || st.inbound === 0) out.push({ code: 'thread_hijack', detail: 'Reply/forward subject from a sender with no prior conversation', category: 'phishing', weight: 30 });
+    const neverCorresponded = !st || (st.inbound === 0 && st.outbound === 0);
+    if (neverCorresponded) out.push({ code: 'thread_hijack', detail: 'Reply/forward subject from a sender with no prior conversation in either direction', category: 'phishing', weight: 22 });
   }
   return out;
 }

@@ -45,6 +45,7 @@ export interface Message {
   senderCountry?: string;          // sender country (from Microsoft headers)
   transportHops?: { index: number; from: string; by: string; ip: string; at: string | null }[];
   mailboxUserId?: string;          // the mailbox this copy was ingested from (for per-recipient dedupe)
+  toHeader?: string;               // original To header (e.g. the distro group address)
   tenantId: string;
   direction: Direction;
   source: 'external' | 'internal';
