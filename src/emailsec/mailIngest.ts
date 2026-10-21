@@ -155,24 +155,53 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
   };
 }
 
-// Pull the most recent inbox messages for one mailbox and score any we haven't
-// seen before. Returns how many new messages were scored.
-async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, token: string, folder: 'inbox' | 'sentitems', top = 25): Promise<number> {
+// Per-mailbox high-water mark (last message time we've ingested), so each scan
+// pulls EVERYTHING new since last time — not just the latest 25. In-memory;
+// analysisFor() is the real dedupe, so a restart just re-checks a recent window.
+const highWater = new Map<string, string>();
+const hwKey = (c: string, u: string, f: string) => `${c}:${u}:${f}`;
+const FIRST_SCAN_LOOKBACK_DAYS = 14;
+
+// Pull ALL messages received since the last scan for one mailbox (paginated), and
+// score any we haven't seen before. Returns how many new messages were scored.
+async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, token: string, folder: 'inbox' | 'sentitems'): Promise<number> {
+  const dateField = folder === 'sentitems' ? 'sentDateTime' : 'receivedDateTime';
   const select = folder === 'sentitems'
     ? 'id,internetMessageId,subject,from,sender,toRecipients,sentDateTime,bodyPreview,body,internetMessageHeaders'
     : 'id,internetMessageId,subject,from,toRecipients,replyTo,receivedDateTime,bodyPreview,body,internetMessageHeaders';
-  const url =
+  const key = hwKey(tenantId, userId, folder);
+  const since = highWater.get(key) ?? new Date(Date.now() - FIRST_SCAN_LOOKBACK_DAYS * 864e5).toISOString();
+  let url: string =
     `${GRAPH}/users/${encodeURIComponent(userId)}/mailFolders/${folder}/messages` +
-    `?$top=${top}&$select=${select}&$expand=attachments($select=name,contentType)`;
-  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
-  if (!res.ok) throw new Error(`mail read failed for ${userId}/${folder}: ${res.status} ${await res.text()}`);
-  const json = (await res.json()) as { value: any[] };
+    `?$filter=${dateField} ge ${since}&$orderby=${dateField} desc&$top=50&$select=${select}&$expand=attachments($select=name,contentType)`;
 
-  let scored = 0;
-  for (const m of json.value ?? []) {
-    // sentitems lack receivedDateTime — fall back to sentDateTime.
-    if (!m.receivedDateTime && m.sentDateTime) m.receivedDateTime = m.sentDateTime;
-    if (emailStore.analysisFor(m.id)) continue; // already scored — skip
+  let scored = 0, pages = 0, newest = since;
+  while (url && pages < 40) { // cap ~2000 msgs/scan to bound a huge first scan
+    let res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    if (res.status === 429) { // throttled — back off once and retry
+      const wait = Number(res.headers.get('retry-after') ?? '5') * 1000;
+      await new Promise(r => setTimeout(r, Math.min(wait, 15000)));
+      res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+    }
+    if (!res.ok) throw new Error(`mail read failed for ${userId}/${folder}: ${res.status} ${await res.text()}`);
+    const json = (await res.json()) as { value: any[]; '@odata.nextLink'?: string };
+    for (const m of json.value ?? []) {
+      const when = m.receivedDateTime ?? m.sentDateTime;
+      if (when && when > newest) newest = when;
+      // sentitems lack receivedDateTime — fall back to sentDateTime.
+      if (!m.receivedDateTime && m.sentDateTime) m.receivedDateTime = m.sentDateTime;
+      if (emailStore.analysisFor(m.id)) continue; // already scored — skip
+      scored += await scoreIngested(tenantId, entraTenantId, verifiedDomains, userId, folder, m);
+    }
+    url = json['@odata.nextLink'] ?? '';
+    pages++;
+  }
+  highWater.set(key, newest); // advance the high-water mark
+  return scored;
+}
+
+async function scoreIngested(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, folder: 'inbox' | 'sentitems', m: any): Promise<number> {
+  {
     const msg = normalize(tenantId, verifiedDomains, m, folder);
     msg.mailboxUserId = userId;
     const analysis = await analyze(msg);
@@ -193,9 +222,8 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
         if (active && dlp.data.action === 'quarantine') await applyDisposition(entraTenantId, userId, ref, 'quarantine');
       }
     }
-    scored++;
+    return 1;
   }
-  return scored;
 }
 
 async function ingestMailbox(tenantId: string, entraTenantId: string, verifiedDomains: string[], userId: string, token: string): Promise<number> {
