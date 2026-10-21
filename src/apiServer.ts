@@ -19,6 +19,7 @@ import { hydrateTeam } from './team';
 import { hydrateAiConfig } from './aiConfig';
 import { hydrateGeoConfig } from './geoConfig';
 import { startDigestScheduler } from './digestScheduler';
+import { startMailPolling } from './mailPoller';
 import { hydrateDigestState } from './digestState';
 import { hydrateAiUsage } from './aiUsage';
 import { hydrateBaseline, hydrateSenderOverrides } from './emailsec/baseline';
@@ -110,6 +111,7 @@ async function main() {
   if (config.directoryProvider === 'graph') {
     setInterval(() => { renewDue().then(n => { if (n) console.log(`[subs] renewed ${n} subscription(s)`); }).catch(() => {}); }, 30 * 60000);
     startDigestScheduler();
+    startMailPolling();
   }
   app.get('/', (_req, res) => res.sendFile(join(__dirname, '..', 'web', 'console.html')));
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
