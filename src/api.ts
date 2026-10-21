@@ -565,15 +565,16 @@ export function buildApi() {
     if (direction) rows = rows.filter(r => r.direction === direction);
     if (status) rows = rows.filter(r => r.status === status);
     const lc = (s: any) => String(s ?? '').toLowerCase();
+    const recips = (r: any) => (r.recipients?.length ? r.recipients : [r.to]).map(lc);
     if (from) rows = rows.filter(r => lc(r.from).includes(from));
-    if (to) rows = rows.filter(r => lc(r.to).includes(to));
+    if (to) rows = rows.filter(r => recips(r).some((x: string) => x.includes(to)));
     // one search box: sender, recipient, subject, or body keywords
     if (q) rows = rows.filter(r => {
       const m = emailStore.messages.get(r.id);
-      return lc(r.from).includes(q) || lc(r.to).includes(q) || lc(r.subject).includes(q) || lc(m?.bodyText).includes(q);
+      return lc(r.from).includes(q) || recips(r).some((x: string) => x.includes(q)) || lc(r.subject).includes(q) || lc(m?.bodyText).includes(q);
     });
     // filter by a verified domain (either side of the message)
-    if (domain) rows = rows.filter(r => lc(r.from).endsWith('@' + domain) || lc(r.from).endsWith('.' + domain) || lc(r.to).endsWith('@' + domain) || lc(r.to).endsWith('.' + domain));
+    if (domain) rows = rows.filter(r => lc(r.from).endsWith('@' + domain) || lc(r.from).endsWith('.' + domain) || recips(r).some((x: string) => x.endsWith('@' + domain) || x.endsWith('.' + domain)));
     const total = rows.length;
     const slice = rows.slice(page * per, page * per + per).map((r, i) => ({ ...r, verdictLabel: VERDICT_LABEL[r.verdict], service, idx: page * per + i }));
     res.json({ rows: slice, total, page, pages: Math.ceil(total / per) || 1 });
@@ -604,7 +605,13 @@ export function buildApi() {
     const context = a.verdict === 'clean' ? 'Clean' : (top ? (CTX[top.category] ?? top.category) : CTX[a.verdict] ?? '—');
     const rule = matchingRule(m.tenantId, m.fromAddress);
     const enrich = { queueId: m.id, senderIp: m.senderIp || '', country: m.senderCountry || '', msVerdict: m.msVerdict || '', context, rules: rule ? rule.label : '', senderIntel: baselineReason(m.tenantId, m.fromAddress), spamScore: Math.round(((a.signals ?? []).reduce((s: number, x: any) => s + (x.weight ?? 0), 0) / 14) * 100) / 100 };
-    res.json({ message: { ...m, transportHops: hops }, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich, geoEnabled: geoEnabledFlag });
+    // All mailboxes this logical message was delivered to (distribution groups).
+    const recipients = [...new Set(
+      [...emailStore.messages.values()]
+        .filter(x => x.tenantId === m.tenantId && x.internetMessageId === m.internetMessageId && x.to)
+        .map(x => x.to!)
+    )];
+    res.json({ message: { ...m, transportHops: hops, recipients, toHeader: (m as any).toHeader }, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich, geoEnabled: geoEnabledFlag });
   });
 
   // Remediate a delivered message now: move it to quarantine and mark it.

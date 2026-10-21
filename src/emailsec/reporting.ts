@@ -25,18 +25,31 @@ export function dashboard(tenantId: string) {
 
 export function liveTracker(tenantId: string) {
   const msgs = emailStore.messagesForTenant(tenantId);
-  return msgs
-    .map(m => {
-      const a = emailStore.analysisFor(m.id);
-      if (!a) return null; // message saved but not yet scored — skip (don't crash the log)
-      // A message delivered because an admin manually released it gets a distinct
-      // status so it's visually separable from auto-delivered clean mail.
+  // Consolidate copies of the same logical message (same internetMessageId delivered
+  // to multiple mailboxes, e.g. a distribution group) into ONE row, collecting all
+  // recipient mailboxes. Per-copy storage is kept for digests/dedupe; this is display.
+  const groups = new Map<string, { m: any; a: any; recipients: Set<string> }>();
+  for (const m of msgs) {
+    const a = emailStore.analysisFor(m.id);
+    if (!a) continue; // saved but not yet scored — skip (don't crash the log)
+    const key = m.internetMessageId || m.id;
+    let g = groups.get(key);
+    if (!g) { g = { m, a, recipients: new Set() }; groups.set(key, g); }
+    if (m.to) g.recipients.add(m.to);
+    // keep the newest copy as representative
+    if (m.receivedAt > g.m.receivedAt) { g.m = m; g.a = a; }
+  }
+  return [...groups.values()]
+    .map(({ m, a, recipients }) => {
       const released = a.disposition === 'deliver' && (a.releasedManually || emailStore.isReleased(m.internetMessageId));
+      const recips = [...recipients];
       return {
         id: m.id,
         at: m.receivedAt,
         from: m.fromAddress ?? '',
-        to: m.to ?? '',
+        to: recips[0] ?? (m.to ?? ''),
+        recipients: recips,
+        recipientCount: recips.length,
         subject: m.subject ?? '',
         verdict: a.verdict,
         status: released ? 'released' : a.disposition,
@@ -44,7 +57,6 @@ export function liveTracker(tenantId: string) {
         direction: m.direction,
       };
     })
-    .filter((r): r is NonNullable<typeof r> => r !== null)
     .sort((x, y) => (x.at < y.at ? 1 : -1));
 }
 

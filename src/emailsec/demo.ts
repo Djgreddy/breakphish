@@ -58,7 +58,7 @@ async function main() {
   line('   ' + pad('From', 34) + pad('Subject', 30) + pad('Verdict', 18) + 'Status');
   line('   ' + '-'.repeat(88));
   for (const row of liveTracker(tenantId)) {
-    line('   ' + pad(row.from, 34) + pad(row.subject, 30) + pad(VERDICT_LABEL[row.verdict], 18) + (STATUS_LABEL[row.status] ?? row.status));
+    line('   ' + pad(row.from, 34) + pad(row.subject, 30) + pad((VERDICT_LABEL as any)[row.verdict], 18) + ((STATUS_LABEL as any)[row.status] ?? row.status));
   }
   hr();
 

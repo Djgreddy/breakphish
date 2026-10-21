@@ -140,7 +140,7 @@ const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p
 const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated',released:'Released'};
 const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
 
-const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',filterRange:'all',filterDomain:'',dateFrom:'',dateTo:'',page:0,session:null};
+const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',filterRange:'all',filterDomain:'',dateFrom:'',dateTo:'',page:0,pageSize:25,session:null};
 let PRESET_STATUS=null;
 function reviewQuarantine(){PRESET_STATUS='quarantine';go('tracker');}
 
@@ -391,7 +391,7 @@ function stat(l,v,color){return `<div class="s"><div class="l">${l}</div><div cl
 
 VIEWS.tracker=async function(){return trackerNode();};
 async function trackerNode(){
-  const qs=new URLSearchParams({page:STATE.page,from:STATE.filterFrom,to:STATE.filterTo,direction:STATE.filterDir,status:STATE.filterStatus,verdict:STATE.filterVerdict,q:STATE.filterText,range:STATE.filterRange,domain:STATE.filterDomain,dfrom:STATE.dateFrom,dto:STATE.dateTo});
+  const qs=new URLSearchParams({page:STATE.page,from:STATE.filterFrom,to:STATE.filterTo,direction:STATE.filterDir,status:STATE.filterStatus,verdict:STATE.filterVerdict,q:STATE.filterText,range:STATE.filterRange,domain:STATE.filterDomain,dfrom:STATE.dateFrom,dto:STATE.dateTo,per:STATE.pageSize});
   if(!STATE._domains){try{const c=await api('/customers/'+STATE.customerId);STATE._domains=[...new Set([c.domain,...(c.connection?.verifiedDomains||[])].filter(Boolean))];STATE._mode=c.mode;}catch(e){STATE._domains=[];}}
   const data=await api(`/customers/${STATE.customerId}/messages?${qs}`);
   const v=el('<div></div>');
@@ -435,7 +435,7 @@ async function trackerNode(){
     const srcLabel=m.source==='internal'?'Internal':'External';
     const row=el(`<tr><td class="mono" style="color:var(--faint);white-space:nowrap;font-size:11px">${dt}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td>
-      <td style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.to}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.to}${m.recipientCount>1?` <span class="pill p-muted" style="font-size:10px" title="Delivered to ${m.recipientCount} mailboxes">+${m.recipientCount-1}</span>`:''}</td>
       <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
       <td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td>
       <td><span class="pill ${DISP_CLS[m.status]}">${STATE._mode==='passive'&&['junk','quarantine','remediated'].includes(m.status)?'Would '+DISP_LABEL[m.status].toLowerCase():DISP_LABEL[m.status]}</span></td>
@@ -446,8 +446,10 @@ async function trackerNode(){
     tb.appendChild(row);
   });
   twrap.appendChild(tbl);card.appendChild(twrap);
-  const pager=el(`<div class="pager"><span>${data.total.toLocaleString()} messages</span><div style="flex:1"></div>
+  const pgOpts=[15,25,50,100].map(n=>`<option value="${n}" ${STATE.pageSize===n?'selected':''}>${n} / page</option>`).join('');
+  const pager=el(`<div class="pager"><span>${data.total.toLocaleString()} messages</span><select id="psize" style="margin-left:10px;padding:5px 8px;font-size:12px">${pgOpts}</select><div style="flex:1"></div>
     <button id="pp" ${STATE.page===0?'disabled':''}>‹</button><span class="mono">${STATE.page+1}/${data.pages}</span><button id="pn" ${STATE.page>=data.pages-1?'disabled':''}>›</button></div>`);
+  pager.querySelector('#psize').onchange=e=>{STATE.pageSize=Number(e.target.value);STATE.page=0;refresh();};
   pager.querySelector('#pp').onclick=()=>{STATE.page--;refresh();};pager.querySelector('#pn').onclick=()=>{STATE.page++;refresh();};
   card.appendChild(pager);
   v.appendChild(card);
@@ -466,7 +468,7 @@ async function openMessage(id){
   const en=d.enrich||{};
   const TABS={
     'Email Details':()=>`<div style="border:1px solid var(--line2);border-radius:10px;overflow:hidden">
-      ${kv('Envelope From',m.fromAddress)}${kv('Header From',`${m.fromDisplay} &lt;${m.fromAddress}&gt;`)}${kv('To',m.to)}${kv('Reply-To',m.replyTo||'—')}${kv('Subject',m.subject)}
+      ${kv('Envelope From',m.fromAddress)}${kv('Header From',`${m.fromDisplay} &lt;${m.fromAddress}&gt;`)}${(d.message.recipients&&d.message.recipients.length>1)?kv('Delivered to',`${d.message.recipients.length} mailboxes: <span style="color:var(--muted)">${d.message.recipients.map(r=>esc(r)).join(', ')}</span>`)+(d.message.toHeader?kv('Addressed to',esc(d.message.toHeader)):''):kv('To',m.to)}${kv('Reply-To',m.replyTo||'—')}${kv('Subject',m.subject)}
       ${kv('Received At',new Date(m.receivedAt).toLocaleString())}${kv('Sender IP',en.senderIp?`<span class="mono">${en.senderIp}</span>`:'—')}${kv('Country',en.country||'—')}
       ${kv('Source',m.source==='internal'?'Internal':'External')}${kv('Attachments',(m.attachments&&m.attachments.length)?m.attachments.map(x=>x.filename).join(', '):'—')}
       ${kv('Direction',m.direction)}${kv('Queue ID',`<span class="mono" style="font-size:12px">${en.queueId||m.id}</span>`)}${kv('Message ID',`<span class="mono" style="font-size:12px">${m.internetMessageId||m.id}</span>`)}
