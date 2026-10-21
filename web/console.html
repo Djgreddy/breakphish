@@ -237,6 +237,7 @@ function icon(n){return `<svg viewBox="0 0 24 24" fill="none"><path d="${ICONS[n
 const NAV_PARTNER=[
   ['p-tracker','Message Log','mail'],
   ['customers','Customers','grid'],
+  ['p-health','Connection Health','chart'],
   ['p-team','Team Members','users'],
   ['p-policy','Policy','shield'],
   ['p-analytics','Analytics','chart'],
@@ -264,7 +265,7 @@ function chrome(){
 async function go(view){
   STATE.view=view;STATE.page=0;STATE.filterText='';STATE.filterVerdict='';STATE.filterFrom='';STATE.filterTo='';STATE.filterDir='';STATE.filterStatus='';STATE.filterRange='all';STATE.filterDomain='';
   if(view==='tracker'&&PRESET_STATUS){STATE.filterStatus=PRESET_STATUS;}PRESET_STATUS=null;
-  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Message Log',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Message Log','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs','p-dashboard':'Partner Dashboard','audit':'Audit Logs','analytics':'Analytics','sender-intel':'Sender Intelligence'})[view]||view;
+  document.getElementById('ctx').textContent=({customers:'Customers',dashboard:'Email Security Hub',tracker:'Message Log',quarantine:'Quarantine',users:'Users',policy:'Policy',settings:'Settings','p-tracker':'Message Log','p-team':'Team Members','p-policy':'Policy','p-analytics':'Analytics','p-invoices':'Invoices','p-audit':'Audit Logs','p-dashboard':'Partner Dashboard','audit':'Audit Logs','analytics':'Analytics','sender-intel':'Sender Intelligence','p-health':'Connection Health'})[view]||view;
   chrome();
   const host=document.getElementById('view');host.innerHTML='<div class="loading"><div class="spin"></div>Loading live data…</div>';
   try{const node=await VIEWS[view]();host.innerHTML='';host.appendChild(node);}
@@ -687,6 +688,35 @@ VIEWS['sender-intel']=async function(){
   let sdeb;filt.querySelector('#sisearch').oninput=()=>{clearTimeout(sdeb);sdeb=setTimeout(draw,200);};
   filt.querySelector('#sifilter').onchange=draw;
   v.appendChild(card);await load();
+  return v;
+};
+
+/* ---- Connection Health ---- */
+VIEWS['p-health']=async function(){
+  const v=el('<div></div>');
+  v.appendChild(el('<div class="ph"><h1>Connection Health</h1><p>Real-time ingestion status per customer</p></div>'));
+  const {connections}=await api('/health/connections');
+  const ago=(ts)=>{if(!ts)return 'never';const s=Math.round((Date.now()-ts)/1000);if(s<60)return s+'s ago';if(s<3600)return Math.round(s/60)+'m ago';return Math.round(s/3600)+'h ago';};
+  const card=el('<div class="card"></div>');
+  const twrap=el('<div class="tablewrap"></div>');
+  const tbl=el('<table style="min-width:860px"><thead><tr><th>Customer</th><th>Connected</th><th>Mailboxes</th><th>Subscriptions</th><th>Real-time</th><th>Last push</th><th>Last sync</th></tr></thead><tbody></tbody></table>');
+  const tb=tbl.querySelector('tbody');
+  if(!connections.length)tb.appendChild(el('<tr><td colspan="7" style="padding:30px;text-align:center;color:var(--faint)">No customers.</td></tr>'));
+  connections.forEach(c=>{
+    const subCov=c.connected?(c.subscriptions>=c.mailboxes&&c.mailboxes>0?'p-ok':c.subscriptions>0?'p-warn':'p-danger'):'p-muted';
+    const rt=!c.connected?'<span class="pill p-muted">—</span>':c.realtime?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span>':'<span class="pill p-warn">Polling only</span>';
+    tb.appendChild(el(`<tr>
+      <td style="font-weight:600">${c.name}${c.mode==='passive'?' <span class="pill p-warn" style="font-size:10px">Monitor</span>':''}</td>
+      <td>${c.connected?'<span class="pill p-ok">Yes</span>':'<span class="pill p-danger">No</span>'}</td>
+      <td class="mono">${c.mailboxes}</td>
+      <td><span class="pill ${subCov}">${c.subscriptions}/${c.mailboxes}</span></td>
+      <td>${rt}</td>
+      <td class="mono" style="color:var(--muted);font-size:12px">${ago(c.lastWebhookAt)}</td>
+      <td class="mono" style="color:var(--muted);font-size:12px">${ago(c.lastSyncAt)}</td>
+    </tr>`));
+  });
+  twrap.appendChild(tbl);card.appendChild(twrap);v.appendChild(card);
+  v.appendChild(el('<div style="font-size:12px;color:var(--faint);margin-top:12px;max-width:760px"><b>Real-time: Active</b> means Microsoft is pushing new mail instantly via webhooks. <b>Polling only</b> means no push received recently — BreakPhish still catches all mail within ~5 min via polling, but for instant delivery, ensure inbound HTTPS (443) is open so Microsoft can reach <span class="mono">/webhooks/graph</span>. Subscriptions below the mailbox count will auto-heal on the next cycle.</div>'));
   return v;
 };
 

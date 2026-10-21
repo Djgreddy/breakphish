@@ -16,6 +16,7 @@ import express from 'express';
 import { getSubscription } from './emailsec/subscriptions';
 import { getConnection } from './consent';
 import { ingestOneMessage } from './emailsec/mailIngest';
+import { markWebhook } from './connHealth';
 
 export function buildWebhookApp() {
   const app = express.Router();
@@ -41,6 +42,7 @@ export function buildWebhookApp() {
         const conn = getConnection(sub.customerId);
         const messageId = n.resourceData?.id;
         if (!conn?.entraTenantId || !messageId) continue;
+        markWebhook(sub.customerId);
         const disp = await ingestOneMessage(sub.customerId, conn.entraTenantId, sub.userId, messageId);
         if (disp) console.log(`[webhook] scored ${messageId} → ${disp}`);
       } catch (e) {

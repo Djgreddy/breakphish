@@ -14,6 +14,7 @@ import { dashboard, liveTracker } from './emailsec/reporting';
 import { ingestTenantMail } from './emailsec/mailIngest';
 import { applyDisposition } from './emailsec/mailActions';
 import { subscribeTenant, listSubscriptions } from './emailsec/subscriptions';
+import { healthFor } from './connHealth';
 import { persistScored } from './db/hydrate';
 import { dbEnabled } from './db/db';
 import { DEFAULT_POLICY, policyFor } from './emailsec/policy';
@@ -89,6 +90,24 @@ export function buildApi() {
   api.use(requireAuth);                              // every API call needs a session
   api.use(blockReadOnlyWrites);                      // read-only team members: GET only
   api.use('/customers/:id', requireCustomerAccess); // per-customer scope check
+
+  // ---- Connection health (real-time status) ----
+  api.get('/health/connections', requirePartner, (_req, res) => {
+    const subsByCust = new Map<string, number>();
+    for (const s of listSubscriptions()) subsByCust.set(s.customerId, (subsByCust.get(s.customerId) ?? 0) + 1);
+    const rows = listCustomers().map(c => {
+      const conn = getConnection(c.id);
+      const mailboxes = store.usersForTenant(c.id).filter(u => u.enabled).length;
+      const h = healthFor(c.id);
+      return {
+        id: c.id, name: c.name, connected: !!conn?.entraTenantId, mode: c.mode,
+        mailboxes, subscriptions: subsByCust.get(c.id) ?? 0,
+        lastWebhookAt: h.lastWebhookAt || null, lastSyncAt: h.lastSyncAt || null,
+        realtime: h.realtime,
+      };
+    });
+    res.json({ connections: rows });
+  });
 
   // ---- Sender Intelligence (behavioral baseline) — partner admins only ----
   api.get('/customers/:id/sender-intel', requirePartner, requireTeamAdmin, (req, res) => {

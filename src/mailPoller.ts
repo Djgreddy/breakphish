@@ -8,6 +8,8 @@ import { config } from './config';
 import { listCustomers } from './onboarding';
 import { getConnection } from './consent';
 import { ingestTenantMail } from './emailsec/mailIngest';
+import { subscribeTenant } from './emailsec/subscriptions';
+import { markSync } from './connHealth';
 
 let running = false;
 let lastRun = 0;
@@ -20,7 +22,10 @@ export async function pollOnce(): Promise<void> {
     for (const c of listCustomers()) {
       if (!getConnection(c.id)?.entraTenantId) continue; // only connected tenants
       try {
+        // self-heal real-time: make sure every mailbox has a live subscription
+        try { await subscribeTenant(c.id); } catch { /* firewall/handshake issues show up in the health panel */ }
         const r = await ingestTenantMail(c.id);
+        markSync(c.id);
         if (r.scored) console.log(`[poll] ${c.name}: scored ${r.scored} new message(s)`);
       } catch (e) {
         console.error(`[poll] ${c.name}:`, (e as Error).message);
