@@ -171,12 +171,15 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
     : 'id,internetMessageId,subject,from,toRecipients,replyTo,receivedDateTime,bodyPreview,body,internetMessageHeaders';
   const key = hwKey(tenantId, userId, folder);
   const since = highWater.get(key) ?? new Date(Date.now() - FIRST_SCAN_LOOKBACK_DAYS * 864e5).toISOString();
+  // Default message order is newest-first. We page through until we reach mail older
+  // than the high-water (already scanned). No $filter/$orderby — Graph rejects
+  // combining them on receivedDateTime, which silently broke the scan.
   let url: string =
     `${GRAPH}/users/${encodeURIComponent(userId)}/mailFolders/${folder}/messages` +
-    `?$filter=${dateField} ge ${since}&$orderby=${dateField} desc&$top=50&$select=${select}&$expand=attachments($select=name,contentType)`;
+    `?$top=50&$select=${select}&$expand=attachments($select=name,contentType)`;
 
-  let scored = 0, pages = 0, newest = since;
-  while (url && pages < 40) { // cap ~2000 msgs/scan to bound a huge first scan
+  let scored = 0, pages = 0, newest = since, stop = false;
+  while (url && pages < 40 && !stop) { // cap ~2000 msgs/scan to bound a huge first scan
     let res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
     if (res.status === 429) { // throttled — back off once and retry
       const wait = Number(res.headers.get('retry-after') ?? '5') * 1000;
@@ -185,14 +188,18 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
     }
     if (!res.ok) throw new Error(`mail read failed for ${userId}/${folder}: ${res.status} ${await res.text()}`);
     const json = (await res.json()) as { value: any[]; '@odata.nextLink'?: string };
+    let olderThanSince = 0;
     for (const m of json.value ?? []) {
       const when = m.receivedDateTime ?? m.sentDateTime;
       if (when && when > newest) newest = when;
+      if (when && when <= since) { olderThanSince++; continue; } // already scanned territory
       // sentitems lack receivedDateTime — fall back to sentDateTime.
       if (!m.receivedDateTime && m.sentDateTime) m.receivedDateTime = m.sentDateTime;
       if (emailStore.analysisFor(m.id)) continue; // already scored — skip
       scored += await scoreIngested(tenantId, entraTenantId, verifiedDomains, userId, folder, m);
     }
+    // once a whole page is older than the high-water, we've caught up — stop paging
+    if (json.value?.length && olderThanSince === json.value.length) stop = true;
     url = json['@odata.nextLink'] ?? '';
     pages++;
   }
