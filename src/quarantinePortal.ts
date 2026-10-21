@@ -36,11 +36,12 @@ export function verifyPortalToken(token: string): { customerId: string; email: s
   } catch { return null; }
 }
 
-function quarantinedForUser(customerId: string, email: string) {
-  // quarantinedForTenant returns ANALYSES — map each to its message, then match recipient.
+// since (epoch ms): when > 0, only items quarantined after that time (delta digest).
+export function quarantinedForUser(customerId: string, email: string, since = 0) {
   return emailStore.quarantinedForTenant(customerId)
     .map((a: any) => emailStore.messages.get(a.messageId))
-    .filter((m: any): m is any => !!m && (m.to || '').toLowerCase() === email.toLowerCase());
+    .filter((m: any): m is any => !!m && (m.to || '').toLowerCase() === email.toLowerCase()
+      && (since === 0 || Date.parse(m.receivedAt) > since));
 }
 
 async function mailboxFor(customerId: string, email: string) {
@@ -57,9 +58,10 @@ const VERDICT_COLOR: Record<string, string> = {
 };
 // The digest email body (also used as the portal page). Table-based + inline
 // styles for email-client compatibility; light theme for readability.
-export function digestHtml(customerId: string, email: string, token: string): string {
+export function digestHtml(customerId: string, email: string, token: string, since = 0): string {
   const base = config.publicBaseUrl;
-  const items = quarantinedForUser(customerId, email);
+  const items = quarantinedForUser(customerId, email, since);
+  const isDelta = since > 0;
   const btn = (label: string, href: string, bg: string, fg: string, border = bg) =>
     `<a href="${href}" style="display:inline-block;min-width:74px;text-align:center;padding:8px 14px;margin:0 0 6px;background:${bg};color:${fg};text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;border:1px solid ${border}">${label}</a>`;
   const rows = items.map((m: any) => {
@@ -94,7 +96,7 @@ export function digestHtml(customerId: string, email: string, token: string): st
         </td></tr>
         <tr><td style="padding:22px 24px 6px">
           <div style="color:#1c2338;font-size:15px;font-weight:600">Hi ${esc(email.split('@')[0])},</div>
-          <div style="color:#5b6478;font-size:14px;margin-top:4px">You have <b style="color:#1c2338">${items.length}</b> message${items.length === 1 ? '' : 's'} held in quarantine. Review them below — <b>Deliver</b> to send to your inbox, <b>Preview</b> to view safely, or <b>Delete</b> to remove.</div>
+          <div style="color:#5b6478;font-size:14px;margin-top:4px">You have <b style="color:#1c2338">${items.length}</b> ${isDelta ? 'new ' : ''}message${items.length === 1 ? '' : 's'} ${isDelta ? 'quarantined since your last digest' : 'held in quarantine'}. Review them below — <b>Deliver</b> to send to your inbox, <b>Preview</b> to view safely, or <b>Delete</b> to remove.${isDelta ? ' Your full quarantine is always available in the portal.' : ''}</div>
         </td></tr>
         ${rows || '<tr><td style="padding:20px 24px;color:#8a90a2;font-size:14px">No quarantined mail. 🎉</td></tr>'}
         <tr><td style="padding:14px 24px 26px">

@@ -304,3 +304,11 @@ create table if not exists geo_config (
 
 -- mailbox this message copy was ingested from (per-recipient dedupe for group mail)
 alter table messages add column if not exists mailbox_user_id text;
+
+-- per-user last quarantine-digest send time (for delta-only digests)
+create table if not exists digest_state (
+  customer_id text not null,
+  user_email  text not null,
+  last_sent_at timestamptz not null default now(),
+  primary key (customer_id, user_email)
+);

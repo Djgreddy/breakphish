@@ -11,7 +11,8 @@ import { getSettings } from './settings';
 import { store } from './store';
 import { emailStore } from './emailsec/store';
 import { appToken } from './directory/graphProvider';
-import { digestHtml, signPortalToken } from './quarantinePortal';
+import { digestHtml, signPortalToken, quarantinedForUser } from './quarantinePortal';
+import { getLastSent, setLastSent } from './digestState';
 
 const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const sentSlots = new Set<string>(); // `${customerId}:${yyyy-mm-dd}:${time}`
@@ -25,8 +26,8 @@ function parseTime(t: string): number | null {
   return h * 60 + min;
 }
 
-async function sendDigestTo(customerId: string, entraTenantId: string, email: string): Promise<boolean> {
-  const html = digestHtml(customerId, email, signPortalToken(customerId, email));
+async function sendDigestTo(customerId: string, entraTenantId: string, email: string, since = 0): Promise<boolean> {
+  const html = digestHtml(customerId, email, signPortalToken(customerId, email), since);
   const token = await appToken(entraTenantId);
   const r = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(email)}/sendMail`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -55,17 +56,22 @@ async function runOnce(now = new Date()): Promise<void> {
       if (sentSlots.has(guard)) continue;
       sentSlots.add(guard);
 
-      // every user who currently has quarantined mail gets their own digest
+      // every user who has quarantined mail, but only send if they have NEW items
       const recipients = new Set<string>();
       for (const a of emailStore.quarantinedForTenant(c.id)) {
         const m = emailStore.messages.get((a as any).messageId);
         if (m?.to) recipients.add(m.to.toLowerCase());
       }
-      let sent = 0;
+      let sent = 0, skipped = 0;
       for (const email of recipients) {
-        try { if (await sendDigestTo(c.id, conn.entraTenantId, email)) sent++; } catch { /* skip */ }
+        const since = getLastSent(c.id, email);
+        const fresh = quarantinedForUser(c.id, email, since);
+        if (!fresh.length) { skipped++; continue; } // nothing new → no email
+        try {
+          if (await sendDigestTo(c.id, conn.entraTenantId, email, since)) { sent++; await setLastSent(c.id, email); }
+        } catch { /* skip */ }
       }
-      if (sent) console.log(`[digest] sent ${sent} digest(s) for ${c.name} at ${t}`);
+      if (sent || skipped) console.log(`[digest] ${c.name} @ ${t}: sent ${sent}, skipped ${skipped} (no new items)`);
     }
   }
 }
