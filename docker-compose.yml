@@ -16,6 +16,12 @@ services:
       - GIT_BRANCH=${GIT_BRANCH:-}
       - GIT_COMMITTED_AT=${GIT_COMMITTED_AT:-}
     restart: unless-stopped
+    volumes:
+      # GeoLite2 IP database for the transport-chain map. Put GeoLite2-City.mmdb
+      # in /opt/breakphish (next to this file); it appears at /app/GeoLite2-City.mmdb
+      # inside the container. Set the Geolocation DB path to that in Settings.
+      # ':ro,z' is read-only; the trailing optional mount tolerates the file being absent.
+      - ./GeoLite2-City.mmdb:/app/GeoLite2-City.mmdb:ro
     expose:
       - "4000"            # internal only; Caddy talks to it, not the internet
 

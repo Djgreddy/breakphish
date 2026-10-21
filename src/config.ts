@@ -35,7 +35,7 @@ export const config = {
   // to a third party); 'none' (default) disables the map and shows the hop list.
   geo: {
     provider: (process.env.GEOIP_PROVIDER ?? 'none') as 'none' | 'maxmind' | 'ipapi',
-    dbPath: process.env.GEOIP_DB ?? '/opt/breakphish/GeoLite2-City.mmdb',
+    dbPath: process.env.GEOIP_DB ?? '/app/GeoLite2-City.mmdb',
   },
 
   // Microsoft Graph multi-tenant app (only used when directoryProvider = 'graph').

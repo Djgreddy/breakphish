@@ -494,9 +494,14 @@ async function openMessage(id){
           </div>
         </div>`;
       }).join('');
+      const withIp=hops.filter(h=>h.ip).length;
       const geoHops=hops.filter(h=>h.geo&&typeof h.geo.lat==='number');
-      const map=(d.geoEnabled&&geoHops.length)?transportMap(geoHops):'';
-      return `<div style="font-size:11px;color:var(--faint);margin-bottom:10px">The SMTP servers this message passed through, from origin (1) to your mailbox.</div>${map}<div style="border:1px solid var(--line2);border-radius:10px;padding:4px 16px">${rows}</div>`;
+      let map='';
+      if(d.geoEnabled){
+        if(geoHops.length)map=transportMap(geoHops);
+        else map=`<div style="border:1px solid var(--line2);border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:12.5px;color:var(--warn)">No hops could be placed on the map. ${withIp?'The hop IPs didn\'t resolve to a location (if using ip-api, it may be rate-limited — try MaxMind).':'This message\'s Received headers don\'t include public IP addresses for the relays, so there\'s nothing to geolocate.'}</div>`;
+      }
+      return `<div style="font-size:11px;color:var(--faint);margin-bottom:10px">The SMTP servers this message passed through, from origin (1) to your mailbox.${d.geoEnabled?` · ${geoHops.length}/${hops.length} hops mapped`:''}</div>${map}<div style="border:1px solid var(--line2);border-radius:10px;padding:4px 16px">${rows}</div>`;
     },
   };
   function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -1335,7 +1340,7 @@ async function settingsAI(){
 
 async function settingsGeo(){
   const cfg=await api('/geo/config');
-  const m={provider:cfg.provider,dbPath:cfg.dbPath||'/opt/breakphish/GeoLite2-City.mmdb'};
+  const m={provider:cfg.provider,dbPath:cfg.dbPath||'/app/GeoLite2-City.mmdb'};
   const c=el('<div class="card p" style="max-width:680px"></div>');
   const statusPill=cfg.active?'<span class="pill p-ok"><span class="d" style="background:var(--ok)"></span>Active</span>':'<span class="pill p-muted">Not configured</span>';
   c.appendChild(el(`<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h3 style="font-size:15px;flex:1">Geolocation (transport-chain map)</h3>${statusPill}</div>`));
@@ -1348,8 +1353,8 @@ async function settingsGeo(){
   function draw(){
     fields.innerHTML='';
     if(m.provider==='maxmind'){
-      fields.appendChild(sField('GeoLite2 database path',sInput(m.dbPath,v=>m.dbPath=v,'/opt/breakphish/GeoLite2-City.mmdb')));
-      fields.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin-top:-6px">Create a free MaxMind account, download <span class="mono">GeoLite2-City.mmdb</span>, and place it on the server at this path. Customer IPs stay local.</div>'));
+      fields.appendChild(sField('GeoLite2 database path',sInput(m.dbPath,v=>m.dbPath=v,'/app/GeoLite2-City.mmdb')));
+      fields.appendChild(el('<div style="font-size:11.5px;color:var(--faint);margin-top:-6px">Create a free MaxMind account, download <span class="mono">GeoLite2-City.mmdb</span>, and place <span class="mono">GeoLite2-City.mmdb</span> in <span class="mono">/opt/breakphish</span> on the droplet. It mounts into the app at this path. Customer IPs stay local.</div>'));
     } else if(m.provider==='ipapi'){
       fields.appendChild(el('<div style="font-size:12px;color:var(--warn);padding:4px 0">ip-api.com requires no key, but each lookup sends the hop IP to ip-api.com. Fine for testing; MaxMind is recommended for production.</div>'));
     }

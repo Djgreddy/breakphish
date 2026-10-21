@@ -202,7 +202,14 @@ export function contentStructureScorer(m: Message): Signal[] {
   const urgency = has(text, URGENCY), payment = has(text, PAYMENT), credential = has(text, CREDENTIAL);
   if (payment && urgency) out.push({ code: 'bec_urgency_payment', detail: 'Urgent request involving payment / wire / gift-cards — classic BEC pattern', category: 'impersonation', weight: 45 });
   else if (payment) out.push({ code: 'payment_request', detail: 'Message requests a payment / financial action', category: 'spam', weight: 18 });
-  if (credential) out.push({ code: 'credential_lure', detail: 'Message asks you to verify credentials or account', category: 'phishing', weight: 30 });
+  if (credential) {
+    // Credential/2FA/security language is normal in LEGIT transactional mail, which
+    // passes DMARC and links to its own domain. Only treat it as a real phishing
+    // signal when the message isn't DMARC-authenticated (spoofable); otherwise it's
+    // informational. Lookalike/mismatch links are caught separately with full weight.
+    const authed = m.auth.dmarc === 'pass';
+    out.push({ code: 'credential_lure', detail: authed ? 'Account/security language (sender is DMARC-authenticated)' : 'Message asks you to verify credentials or account', category: 'phishing', weight: authed ? 6 : 30 });
+  }
   else if (urgency) out.push({ code: 'urgency', detail: 'Urgency / pressure language', category: 'spam', weight: 10 });
   // Thread hijacking: a Re:/Fwd: from someone we've never heard from.
   if (/^\s*(re|fwd?|aw|wg)\s*:/i.test(m.subject ?? '') && m.source === 'external') {

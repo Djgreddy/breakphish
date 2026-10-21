@@ -291,3 +291,8 @@ function baseTemplates(): PolicyTemplate[] {
 }
 function seedBaseTemplates() { if (!listTemplates(['partner']).length) for (const t of baseTemplates()) templates.set(t.id, t); }
 async function seedBaseTemplatesPersisted() { for (const t of baseTemplates()) { templates.set(t.id, t); await persistTemplate(t); } }
+
+// True if the sender is on an active allow list for this tenant.
+export function isAllowlisted(tenantId: string, fromAddress: string): boolean {
+  return matchingRule(tenantId, fromAddress)?.kind === 'allow';
+}

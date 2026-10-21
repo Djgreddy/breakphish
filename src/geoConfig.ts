@@ -7,7 +7,7 @@ import { config } from './config';
 import { dbEnabled, q } from './db/db';
 
 export type GeoProvider = 'none' | 'maxmind' | 'ipapi';
-let db: { provider: GeoProvider; dbPath: string } = { provider: 'none', dbPath: '/opt/breakphish/GeoLite2-City.mmdb' };
+let db: { provider: GeoProvider; dbPath: string } = { provider: 'none', dbPath: '/app/GeoLite2-City.mmdb' };
 
 const envConfigured = () => (process.env.GEOIP_PROVIDER ?? 'none') !== 'none';
 

@@ -11,7 +11,7 @@ import { domainAgeDays } from './domainAge';
 import { classifyIntent, llmEnabled } from './llm';
 import { recordScored } from '../aiUsage';
 import { makeClassifier } from './classifier';
-import { dispositionFor, resolveTemplate, detectionFlags } from '../policy';
+import { dispositionFor, resolveTemplate, detectionFlags, isAllowlisted } from '../policy';
 import { getSettings } from '../settings';
 import { emailStore } from './store';
 import { persistScored } from '../db/hydrate';
@@ -63,7 +63,14 @@ async function contentSignals(m: Message): Promise<Signal[]> {
 // Established two-way correspondents are trusted — dampen their non-malware risk
 // so normal business mail from known partners isn't false-flagged.
 function trustDiscount(scores: Record<Category, number>, m: Message): Record<Category, number> {
-  if (m.direction === 'inbound' && m.source === 'external' && isEstablished(m.tenantId, m.fromAddress)) {
+  if (m.direction !== 'inbound' || m.source !== 'external') return scores;
+  // An admin allow-listing a sender is an explicit trust decision — dampen hard.
+  if (isAllowlisted(m.tenantId, m.fromAddress)) {
+    scores.spam = Math.round(scores.spam * 0.2);
+    scores.phishing = Math.round(scores.phishing * 0.25);
+    scores.impersonation = Math.round(scores.impersonation * 0.3);
+    scores.policy_infomail = Math.round(scores.policy_infomail * 0.2);
+  } else if (isEstablished(m.tenantId, m.fromAddress)) {
     scores.spam = Math.round(scores.spam * 0.5);
     scores.phishing = Math.round(scores.phishing * 0.6);
     scores.impersonation = Math.round(scores.impersonation * 0.7);

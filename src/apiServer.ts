@@ -18,6 +18,7 @@ import { hydratePolicy } from './policy';
 import { hydrateTeam } from './team';
 import { hydrateAiConfig } from './aiConfig';
 import { hydrateGeoConfig } from './geoConfig';
+import { startDigestScheduler } from './digestScheduler';
 import { hydrateAiUsage } from './aiUsage';
 import { hydrateBaseline, hydrateSenderOverrides } from './emailsec/baseline';
 import { hydrateAudit } from './audit';
@@ -106,6 +107,7 @@ async function main() {
   // Keep Graph subscriptions alive (renew those nearing expiry) every 30 min.
   if (config.directoryProvider === 'graph') {
     setInterval(() => { renewDue().then(n => { if (n) console.log(`[subs] renewed ${n} subscription(s)`); }).catch(() => {}); }, 30 * 60000);
+    startDigestScheduler();
   }
   app.get('/', (_req, res) => res.sendFile(join(__dirname, '..', 'web', 'console.html')));
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
