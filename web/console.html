@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <style>
 :root{
   --ink:#0b0e16;--sidebar1:#121626;--sidebar2:#0e1220;--bg:#0c1019;--surface:#141926;--surface2:#1b2130;
@@ -496,16 +498,39 @@ async function openMessage(id){
       }).join('');
       const withIp=hops.filter(h=>h.ip).length;
       const geoHops=hops.filter(h=>h.geo&&typeof h.geo.lat==='number');
+      window.__transGeo=geoHops;
       let map='';
       if(d.geoEnabled){
-        if(geoHops.length)map=transportMap(geoHops);
+        if(geoHops.length)map=window.L?'<div id="leafmap" style="height:360px;border-radius:10px;overflow:hidden;margin-bottom:12px;border:1px solid var(--line2)"></div>':transportMap(geoHops);
         else map=`<div style="border:1px solid var(--line2);border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:12.5px;color:var(--warn)">No hops could be placed on the map. ${withIp?'The hop IPs didn\'t resolve to a location (if using ip-api, it may be rate-limited — try MaxMind).':'This message\'s Received headers don\'t include public IP addresses for the relays, so there\'s nothing to geolocate.'}</div>`;
       }
       return `<div style="font-size:11px;color:var(--faint);margin-bottom:10px">The SMTP servers this message passed through, from origin (1) to your mailbox.${d.geoEnabled?` · ${geoHops.length}/${hops.length} hops mapped`:''}</div>${map}<div style="border:1px solid var(--line2);border-radius:10px;padding:4px 16px">${rows}</div>`;
     },
   };
   function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-  // Self-contained equirectangular SVG map (no external tiles — CSP-safe).
+  // Real tile map via Leaflet (Carto light basemap). Groups hops that share a
+  // location into one pin labelled with its hop range (e.g. "2–5").
+  let _leaf=null;
+  function initLeafMap(){
+    if(!window.L)return; const elm=document.getElementById('leafmap'); const gh=window.__transGeo||[];
+    if(!elm||!gh.length)return;
+    if(_leaf){try{_leaf.remove();}catch(e){}_leaf=null;}
+    const map=L.map(elm,{zoomControl:true,attributionControl:true,scrollWheelZoom:false});_leaf=map;
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'© OpenStreetMap © CARTO'}).addTo(map);
+    // group consecutive/identical locations
+    const groups=[];gh.forEach(h=>{const key=h.geo.lat.toFixed(1)+','+h.geo.lon.toFixed(1);let g=groups.find(x=>x.key===key);if(!g){g={key,lat:h.geo.lat,lon:h.geo.lon,idx:[],geo:h.geo};groups.push(g);}g.idx.push(h.index);});
+    const pts=[];
+    groups.forEach((g,i)=>{const last=i===groups.length-1;const lo=Math.min(...g.idx),hi=Math.max(...g.idx);const label=lo===hi?String(lo):lo+'–'+hi;
+      const col=last?'#16a34a':'#4f46e5';
+      const icon=L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,15],html:`<div style="width:30px;height:30px;border-radius:50%;background:${col};color:#fff;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;font-family:sans-serif">${label}</div>`});
+      const mk=L.marker([g.lat,g.lon],{icon}).addTo(map);
+      mk.bindTooltip(`<b>Hop ${label}</b><br>${esc((g.geo.city?g.geo.city+', ':'')+(g.geo.country||''))}`,{direction:'top',offset:[0,-12]});
+      pts.push([g.lat,g.lon]);});
+    if(pts.length>1)L.polyline(pts,{color:'#4f46e5',weight:2,dashArray:'6 7',opacity:0.75}).addTo(map);
+    try{if(pts.length>1)map.fitBounds(pts,{padding:[45,45],maxZoom:7});else map.setView(pts[0],5);}catch(e){map.setView(pts[0]||[20,0],2);}
+    setTimeout(()=>map.invalidateSize(),60);
+  }
+  // Self-contained equirectangular SVG map (fallback if Leaflet is unavailable).
   function transportMap(geoHops){
     const W=760,H=380;const px=lon=>((lon+180)/360)*W;const py=lat=>((90-lat)/180)*H;
     const grat=[];for(let lon=-150;lon<=150;lon+=30)grat.push(`<line x1="${px(lon)}" y1="0" x2="${px(lon)}" y2="${H}" stroke="var(--line2)" stroke-width="1"/>`);
@@ -531,7 +556,7 @@ async function openMessage(id){
     <div style="display:flex;gap:10px;align-items:center;padding:14px 20px;border-top:1px solid var(--line)" id="mfoot"><button class="btn" onclick="closeModal()">Close</button><div style="flex:1"></div></div></div>`);
   showModal(modal);
   const tabsEl=modal.querySelector('#mtabs'),bodyEl=modal.querySelector('#mbody'),foot=modal.querySelector('#mfoot');
-  const paint=()=>{bodyEl.innerHTML=TABS[tab]();};
+  const paint=()=>{bodyEl.innerHTML=TABS[tab]();if(tab==='Transport Chain')setTimeout(initLeafMap,30);};
   Object.keys(TABS).forEach(t=>{const bt=el(`<button class="${tab===t?'on':''}">${t}</button>`);bt.onclick=()=>{tab=t;tabsEl.querySelectorAll('button').forEach(x=>x.classList.remove('on'));bt.classList.add('on');paint();};tabsEl.appendChild(bt);});
   paint();
   // split-button with a dropdown of options
