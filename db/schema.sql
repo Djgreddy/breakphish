@@ -301,3 +301,6 @@ create table if not exists geo_config (
   db_path    text,
   updated_at timestamptz not null default now()
 );
+
+-- mailbox this message copy was ingested from (per-recipient dedupe for group mail)
+alter table messages add column if not exists mailbox_user_id text;

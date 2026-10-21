@@ -44,6 +44,7 @@ export interface Message {
   msVerdict?: string;              // Microsoft's own spam verdict (SFV/BCL)
   senderCountry?: string;          // sender country (from Microsoft headers)
   transportHops?: { index: number; from: string; by: string; ip: string; at: string | null }[];
+  mailboxUserId?: string;          // the mailbox this copy was ingested from (for per-recipient dedupe)
   tenantId: string;
   direction: Direction;
   source: 'external' | 'internal';

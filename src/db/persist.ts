@@ -89,13 +89,13 @@ export async function loadGroups(): Promise<any[]> {
 // ---- email: messages + analyses ----
 export async function upsertMessageRow(m: any): Promise<void> {
   await q(
-    `insert into messages (id,tenant_id,direction,source,from_address,from_display,to_address,subject,body_text,received_at,auth,reply_to,sender_domain_age_days,first_time_sender,urls,attachments,internet_message_id,sender_ip,ms_verdict,sender_country,transport_hops)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-     on conflict (id) do update set internet_message_id = excluded.internet_message_id, sender_ip = excluded.sender_ip, ms_verdict = excluded.ms_verdict, sender_country = excluded.sender_country, transport_hops = excluded.transport_hops`,
+    `insert into messages (id,tenant_id,direction,source,from_address,from_display,to_address,subject,body_text,received_at,auth,reply_to,sender_domain_age_days,first_time_sender,urls,attachments,internet_message_id,sender_ip,ms_verdict,sender_country,transport_hops,mailbox_user_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+     on conflict (id) do update set internet_message_id = excluded.internet_message_id, sender_ip = excluded.sender_ip, ms_verdict = excluded.ms_verdict, sender_country = excluded.sender_country, transport_hops = excluded.transport_hops, mailbox_user_id = excluded.mailbox_user_id`,
     [m.id, m.tenantId, m.direction, m.source, m.fromAddress, m.fromDisplay, m.to, m.subject, m.bodyText ?? '',
      m.receivedAt, JSON.stringify(m.auth ?? {}), m.replyTo ?? null, m.senderDomainAgeDays ?? null,
      m.firstTimeSender ?? null, m.urls ?? [], JSON.stringify(m.attachments ?? []), m.internetMessageId ?? null,
-     m.senderIp ?? null, m.msVerdict ?? null, m.senderCountry ?? null, JSON.stringify(m.transportHops ?? [])],
+     m.senderIp ?? null, m.msVerdict ?? null, m.senderCountry ?? null, JSON.stringify(m.transportHops ?? []), m.mailboxUserId ?? null],
   );
 }
 export async function loadMessages(): Promise<any[]> {

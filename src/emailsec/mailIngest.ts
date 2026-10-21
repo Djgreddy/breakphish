@@ -168,6 +168,7 @@ async function ingestFolder(tenantId: string, entraTenantId: string, verifiedDom
     if (!m.receivedDateTime && m.sentDateTime) m.receivedDateTime = m.sentDateTime;
     if (emailStore.analysisFor(m.id)) continue; // already scored — skip
     const msg = normalize(tenantId, verifiedDomains, m, folder);
+    msg.mailboxUserId = userId;
     const analysis = await analyze(msg);
     const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
     const active = isActive(tenantId); // passive (monitor) customers are scored but not acted on
@@ -213,6 +214,7 @@ export async function ingestOneMessage(tenantId: string, entraTenantId: string, 
   const m = await res.json();
   const internalDomains = [...t.verifiedDomains, ...getSettings(tenantId).managedDomains];
   const msg = normalize(tenantId, internalDomains, m, 'inbox');
+  msg.mailboxUserId = userId;
   const analysis = await analyze(msg);
   const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
   if (isActive(tenantId)) { // passive customers are scored but not acted on

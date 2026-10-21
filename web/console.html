@@ -151,6 +151,8 @@ async function boot(){
 }
 function applySession(session){
   STATE.session=session;
+  // clear per-customer caches so one customer's mode/domains never bleed into another
+  STATE._domains=null;STATE._mode=undefined;
   if(session.role==='partner_admin'){STATE.role='partner';STATE.customerId=null;STATE._cust=null;}
   else{STATE.role='admin';STATE.customerId=session.customerId;STATE._cust={id:session.customerId,name:session.customerName,domain:session.customerDomain};}
   document.getElementById('who').style.display='inline';
@@ -342,7 +344,8 @@ VIEWS.dashboard=async function(){
   const seg=el('<div style="display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:3px"></div>');
   [['7d','Last 7 Days'],['30d','Last 30 Days']].forEach(([val,lbl])=>{const b=el(`<button style="padding:7px 13px;border:none;border-radius:7px;font-size:12.5px;font-weight:600;background:${DASH_RANGE===val?'var(--brand)':'none'};color:${DASH_RANGE===val?'#fff':'var(--muted)'}">${lbl}</button>`);b.onclick=()=>{DASH_RANGE=val;go('dashboard');};seg.appendChild(b);});
   head.appendChild(seg);v.appendChild(head);
-  if(STATE._cust&&STATE._cust.mode==='passive'){
+  if(STATE.customerId){try{const cc=await api('/customers/'+STATE.customerId);STATE._mode=cc.mode;}catch(e){}}
+  if(STATE._mode==='passive'){
     v.appendChild(el(`<div class="card p" style="margin-bottom:16px;background:var(--warn-bg);border-left:3px solid var(--warn)"><div style="font-weight:600;font-size:14px">⏸ Monitor mode — protection not yet active</div><div style="font-size:13px;color:var(--muted);margin-top:4px">BreakPhish is scoring every message and learning your organization's patterns, but <b>not acting</b> on mail yet. Over this period it <b>would have</b> quarantined <b style="color:var(--danger)">${(d.quarantined||0).toLocaleString()}</b> messages (${d.threats||0} threats) that reached inboxes. Ask your provider to activate protection when you're ready.</div></div>`));
   }
   // summary cards with trend deltas
