@@ -247,23 +247,26 @@ export async function ingestOneMessage(tenantId: string, entraTenantId: string, 
   if (emailStore.analysisFor(messageId)) return null; // already scored
   const t = store.getTenant(tenantId);
   if (!t) return null;
+  // The subscription stores the object id; resolve it to the user's email (UPN),
+  // which Graph addresses reliably. Falls back to the id if no match.
+  const mailbox = store.usersForTenant(tenantId).find(u => u.externalId === userId)?.email || userId;
   const token = await appToken(entraTenantId);
-  const url = `${GRAPH}/users/${encodeURIComponent(userId)}/messages/${messageId}` +
+  const url = `${GRAPH}/users/${encodeURIComponent(mailbox)}/messages/${messageId}` +
     `?$select=id,internetMessageId,subject,from,toRecipients,replyTo,receivedDateTime,bodyPreview,body,internetMessageHeaders&$expand=attachments($select=name,contentType)`;
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
-  if (!res.ok) { console.error(`[webhook] fetch message failed ${res.status}`); return null; }
+  if (!res.ok) { console.error(`[webhook] fetch message failed for ${mailbox}: ${res.status}`); return null; }
   const m = await res.json();
   const internalDomains = [...t.verifiedDomains, ...getSettings(tenantId).managedDomains];
   const msg = normalize(tenantId, internalDomains, m, 'inbox');
-  msg.mailboxUserId = userId;
+  msg.mailboxUserId = mailbox;
   const analysis = await analyze(msg);
   const ref = { graphId: m.id, internetMessageId: m.internetMessageId };
   if (isActive(tenantId)) { // passive customers are scored but not acted on
     if (['junk', 'quarantine', 'remediated'].includes(analysis.disposition)) {
-      await applyDisposition(entraTenantId, userId, ref, analysis.disposition);
+      await applyDisposition(entraTenantId, mailbox, ref, analysis.disposition);
     } else {
-      await maybeStampBanner(tenantId, entraTenantId, userId, ref, msg, analysis);
-      if (hasActiveLinkRewrite(tenantId)) await rewriteLinks(entraTenantId, userId, ref, config.publicBaseUrl);
+      await maybeStampBanner(tenantId, entraTenantId, mailbox, ref, msg, analysis);
+      if (hasActiveLinkRewrite(tenantId)) await rewriteLinks(entraTenantId, mailbox, ref, config.publicBaseUrl);
     }
   }
   return analysis.disposition;
@@ -279,7 +282,10 @@ export async function ingestTenantMail(tenantId: string): Promise<{ mailboxes: n
   const users = store.usersForTenant(tenantId).filter(u => u.enabled);
   let scored = 0;
   for (const u of users) {
-    try { scored += await ingestMailbox(tenantId, conn.entraTenantId, t.verifiedDomains, u.externalId, token); }
+    // Address the mailbox by email (UPN) — Graph resolves it reliably, unlike some
+    // stored object IDs which can be stale/guest/corrupt (404 ErrorInvalidUser).
+    const mailbox = u.email || u.externalId;
+    try { scored += await ingestMailbox(tenantId, conn.entraTenantId, t.verifiedDomains, mailbox, token); }
     catch (e) { console.error(`[mailIngest] ${u.email}:`, (e as Error).message); }
   }
   return { mailboxes: users.length, scored };
