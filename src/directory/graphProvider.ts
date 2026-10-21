@@ -82,8 +82,20 @@ export class GraphDirectoryProvider implements DirectoryProvider {
 
   async deltaSync(entraTenantId: string, deltaLink: string): Promise<DirSnapshot> {
     const token = await appToken(entraTenantId);
-    const userPage = await pageAll(deltaLink, token);
-    // Groups would be pulled with /groups/delta in the same manner.
-    return { users: userPage.items.map(mapUser), groups: [], deltaLink: userPage.deltaLink };
+    try {
+      const userPage = await pageAll(deltaLink, token);
+      // Groups would be pulled with /groups/delta in the same manner.
+      return { users: userPage.items.map(mapUser), groups: [], deltaLink: userPage.deltaLink };
+    } catch (e) {
+      // An expired or invalid deltaLink requires restarting with a FULL sync — this is
+      // Microsoft's documented resync pattern. Without this, directory sync fails
+      // entirely (0 users), which breaks all mail scanning downstream.
+      const msg = (e as Error).message;
+      if (/Invalid deltaLink|Request_UnsupportedQuery|resync|\b410\b|\b400\b/i.test(msg)) {
+        console.warn('[graph] deltaLink invalid — falling back to full directory sync');
+        return this.fullSync(entraTenantId);
+      }
+      throw e;
+    }
   }
 }
