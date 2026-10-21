@@ -516,7 +516,9 @@ async function openMessage(id){
     if(!elm||!gh.length)return;
     if(_leaf){try{_leaf.remove();}catch(e){}_leaf=null;}
     const map=L.map(elm,{zoomControl:true,attributionControl:true,scrollWheelZoom:false});_leaf=map;
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'© OpenStreetMap © CARTO'}).addTo(map);
+    // Esri World Light Gray — clean light basemap, no API key required.
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',{maxZoom:16,attribution:'Tiles © Esri'}).addTo(map);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{maxZoom:16,opacity:0.9}).addTo(map);
     // group consecutive/identical locations
     const groups=[];gh.forEach(h=>{const key=h.geo.lat.toFixed(1)+','+h.geo.lon.toFixed(1);let g=groups.find(x=>x.key===key);if(!g){g={key,lat:h.geo.lat,lon:h.geo.lon,idx:[],geo:h.geo};groups.push(g);}g.idx.push(h.index);});
     const pts=[];
