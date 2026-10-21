@@ -1005,11 +1005,13 @@ async function policyView(){
   const v=el('<div></div>');
   v.appendChild(el(`<div class="ph"><h1>Policy</h1><p>${isPartner?'Global policies applied to your customers':STATE._cust.name+' · global + your own policies'}</p></div>`));
   if(!POLTAB||!POL_TABS.includes(POLTAB))POLTAB=POL_TABS[0];
-  const tabBar=el('<div class="pilltabs"></div>');
-  const body=el('<div></div>');
+  const wrap=el('<div style="display:flex;gap:20px;align-items:flex-start"></div>');
+  const sideNav=el('<div class="card" style="width:240px;flex:none;padding:8px"></div>');
+  const body=el('<div style="flex:1;min-width:0"></div>');
   const paint=async()=>{body.innerHTML='<div class="loading"><div class="spin"></div></div>';try{let node;if(POLTAB==='Policy Templates')node=await polTemplates();else if(POLTAB==='Auto Remediation')node=await autoRemediationView();else node=await polRules(POL_KIND[POLTAB],POLTAB);body.innerHTML='';body.appendChild(node);}catch(e){body.innerHTML=`<div class="card p" style="color:var(--danger)">${e.message}</div>`;}};
-  POL_TABS.forEach(t=>{const b=el(`<button class="${POLTAB===t?'on':''}">${t}</button>`);b.onclick=async()=>{POLTAB=t;tabBar.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');await paint();};tabBar.appendChild(b);});
-  v.appendChild(tabBar);v.appendChild(body);await paint();
+  POL_TABS.forEach(t=>{const b=el(`<button class="setnav ${POLTAB===t?'on':''}">${t}</button>`);b.onclick=async()=>{POLTAB=t;sideNav.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');await paint();};sideNav.appendChild(b);});
+  wrap.appendChild(sideNav);wrap.appendChild(body);
+  v.appendChild(wrap);await paint();
   return v;
 }
 
