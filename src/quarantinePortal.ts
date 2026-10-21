@@ -11,6 +11,7 @@ import { config } from './config';
 import { emailStore } from './emailsec/store';
 import { getCustomer } from './onboarding';
 import { getConnection } from './consent';
+import { saveRule } from './policy';
 import { store } from './store';
 import { makeMailActions } from './emailsec/mailActions';
 import { persistScored } from './db/hydrate';
@@ -62,46 +63,44 @@ export function digestHtml(customerId: string, email: string, token: string, sin
   const base = config.publicBaseUrl;
   const items = quarantinedForUser(customerId, email, since);
   const isDelta = since > 0;
-  const btn = (label: string, href: string, bg: string, fg: string, border = bg) =>
-    `<a href="${href}" style="display:inline-block;min-width:74px;text-align:center;padding:8px 14px;margin:0 0 6px;background:${bg};color:${fg};text-decoration:none;border-radius:6px;font-size:13px;font-weight:600;border:1px solid ${border}">${label}</a>`;
+  const act = (m: any, doo: string) => `${base}/portal/action?token=${encodeURIComponent(token)}&id=${encodeURIComponent(m.id)}&do=${doo}`;
+  const link = (label: string, href: string, color = '#2563eb') => `<a href="${href}" style="color:${color};text-decoration:none;font-size:13.5px;font-weight:600">${label}</a>`;
   const rows = items.map((m: any) => {
-    const a = emailStore.analysisFor(m.id);
-    const verdict = a?.verdict ?? 'spam';
-    const color = VERDICT_COLOR[verdict] ?? '#6b7280';
-    const act = (doo: string) => `${base}/portal/action?token=${encodeURIComponent(token)}&id=${encodeURIComponent(m.id)}&do=${doo}`;
-    return `<tr><td style="padding:0 24px 14px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e6e8ef;border-radius:10px;border-collapse:separate;overflow:hidden">
-        <tr>
-          <td style="padding:16px 18px;vertical-align:top">
-            <span style="display:inline-block;background:${color};color:#fff;font-size:11px;font-weight:700;letter-spacing:.03em;padding:3px 9px;border-radius:5px;text-transform:uppercase">${esc(verdictLabel(verdict))}</span>
-            <div style="color:#8a90a2;font-size:12px;margin-top:10px">${esc(new Date(m.receivedAt).toLocaleString())}</div>
-            <div style="font-weight:600;color:#1c2338;font-size:14px;margin:3px 0">${esc(m.fromDisplay || m.fromAddress)} <span style="color:#8a90a2;font-weight:400">&lt;${esc(m.fromAddress)}&gt;</span></div>
-            <div style="color:#5b6478;font-size:13.5px">${esc(m.subject || '(no subject)')}</div>
-          </td>
-          <td style="padding:16px 18px;vertical-align:top;text-align:right;white-space:nowrap">
-            ${btn('Deliver', act('deliver'), '#16a34a', '#fff')}<br>
-            ${btn('Preview', `${base}/portal/preview?token=${encodeURIComponent(token)}&id=${encodeURIComponent(m.id)}`, '#ffffff', '#374151', '#d1d5db')}<br>
-            ${btn('Delete', act('delete'), '#dc2626', '#fff')}
-          </td>
-        </tr>
-      </table>
+    const dt = new Date(m.receivedAt);
+    const date = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const time = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    return `<tr><td style="padding:16px 0;border-bottom:1px solid #e6e6e6">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="vertical-align:top">
+          <div style="font-weight:700;color:#1a1a1a;font-size:14px;line-height:1.35">${esc(m.subject || '(no subject)')}</div>
+          <div style="color:#8a8a8a;font-size:12.5px;margin-top:3px">${esc(m.fromDisplay || m.fromAddress)} &lt;${esc(m.fromAddress)}&gt;</div>
+        </td>
+        <td style="vertical-align:top;text-align:right;white-space:nowrap;padding-left:14px">
+          <div style="color:#8a8a8a;font-size:12px;font-weight:600">${date}</div>
+          <div style="color:#8a8a8a;font-size:12px">${time}</div>
+        </td>
+      </tr></table>
+      <div style="margin-top:10px">
+        ${link('Deliver', act(m, 'deliver'))} &nbsp;&nbsp; ${link('Allow sender', act(m, 'allow'))} &nbsp;&nbsp; ${link('Block sender', act(m, 'block'), '#c0392b')}
+      </div>
     </td></tr>`;
   }).join('');
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fb;padding:24px 0;font-family:'Segoe UI',Helvetica,Arial,sans-serif">
+  const portal = `${base}/portal/quarantine?token=${encodeURIComponent(token)}`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;font-family:Arial,Helvetica,sans-serif;padding:8px 0">
     <tr><td align="center">
-      <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(20,27,46,.08)">
-        <tr><td style="background:linear-gradient(135deg,#4f46e5,#6366f1);padding:26px 24px">
-          <div style="color:#fff;font-size:21px;font-weight:700">🛡 Your Quarantine Digest</div>
-          <div style="color:#dcdcff;font-size:13px;margin-top:4px">BreakPhish Security</div>
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%">
+        <tr><td align="center" style="padding:26px 0 8px">
+          <span style="font-size:22px;font-weight:800;color:#1a1a1a;letter-spacing:-.5px">Break<span style="color:#2563eb">Phish</span></span>
         </td></tr>
-        <tr><td style="padding:22px 24px 6px">
-          <div style="color:#1c2338;font-size:15px;font-weight:600">Hi ${esc(email.split('@')[0])},</div>
-          <div style="color:#5b6478;font-size:14px;margin-top:4px">You have <b style="color:#1c2338">${items.length}</b> ${isDelta ? 'new ' : ''}message${items.length === 1 ? '' : 's'} ${isDelta ? 'quarantined since your last digest' : 'held in quarantine'}. Review them below — <b>Deliver</b> to send to your inbox, <b>Preview</b> to view safely, or <b>Delete</b> to remove.${isDelta ? ' Your full quarantine is always available in the portal.' : ''}</div>
+        <tr><td style="padding:14px 28px 0">
+          <h1 style="font-size:22px;font-weight:700;color:#1a1a1a;margin:0 0 16px">You have ${items.length} ${isDelta ? 'new ' : ''}quarantined inbound email${items.length === 1 ? '' : 's'}</h1>
+          <a href="${portal}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 22px;border-radius:5px">View in BreakPhish</a>
         </td></tr>
-        ${rows || '<tr><td style="padding:20px 24px;color:#8a90a2;font-size:14px">No quarantined mail. 🎉</td></tr>'}
-        <tr><td style="padding:14px 24px 26px">
-          <a href="${base}/portal/quarantine?token=${encodeURIComponent(token)}" style="display:inline-block;padding:11px 20px;background:#1c2338;color:#fff;text-decoration:none;border-radius:8px;font-size:13.5px;font-weight:600">Open quarantine portal →</a>
-          <div style="color:#9aa1b6;font-size:11.5px;margin-top:16px;border-top:1px solid #eef0f7;padding-top:14px">This digest was sent by your email security provider. Only act on messages you recognize. Links are secured to your account.</div>
+        <tr><td style="padding:16px 28px 0">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${rows || '<tr><td style="padding:20px 0;color:#8a8a8a;font-size:14px">No quarantined mail.</td></tr>'}</table>
+        </td></tr>
+        <tr><td style="padding:26px 28px 30px">
+          <div style="color:#9a9a9a;font-size:12px;line-height:1.5;text-align:center">This email was sent from BreakPhish because you or your administrator requested that you be notified of your quarantined messages. You can manage your full quarantine in <a href="${portal}" style="color:#2563eb;text-decoration:none">the BreakPhish portal</a>.</div>
         </td></tr>
       </table>
     </td></tr>
@@ -147,6 +146,22 @@ export function buildPortalApp() {
         emailStore.messages.delete(id); emailStore.analyses.delete(id);
         audit({ actorEmail: v.email, role: 'end_user', action: 'mail.delete', resource: m.subject, detail: 'via quarantine portal', customerId: v.customerId });
         return res.send(page('Deleted', `"${esc(m.subject)}" has been deleted.`));
+      }
+      if (doo === 'allow') {
+        // deliver this one AND allow the sender going forward
+        a.disposition = 'deliver'; a.remediated = false; a.releasedManually = true; emailStore.saveAnalysis(a); await persistScored(m, a);
+        emailStore.markReleased(m.internetMessageId);
+        if (conn?.entraTenantId && user) await makeMailActions().moveToInbox(conn.entraTenantId, user.externalId, { graphId: id, internetMessageId: m.internetMessageId });
+        await saveRule({ scope: v.customerId, kind: 'allow', data: { sender: m.fromAddress, comment: `Allowed by ${v.email} from quarantine digest` } });
+        audit({ actorEmail: v.email, role: 'end_user', action: 'sender.allow', resource: m.fromAddress, detail: 'via quarantine digest', customerId: v.customerId });
+        return res.send(page('Sender allowed', `"${esc(m.subject)}" has been delivered, and mail from ${esc(m.fromAddress)} will be allowed going forward.`));
+      }
+      if (doo === 'block') {
+        await saveRule({ scope: v.customerId, kind: 'block', data: { sender: m.fromAddress, comment: `Blocked by ${v.email} from quarantine digest` } });
+        if (conn?.entraTenantId && user) await makeMailActions().moveToDeleted(conn.entraTenantId, user.externalId, { graphId: id, internetMessageId: m.internetMessageId });
+        emailStore.messages.delete(id); emailStore.analyses.delete(id);
+        audit({ actorEmail: v.email, role: 'end_user', action: 'sender.block', resource: m.fromAddress, detail: 'via quarantine digest', customerId: v.customerId });
+        return res.send(page('Sender blocked', `Mail from ${esc(m.fromAddress)} will be blocked going forward.`));
       }
       return res.status(400).send(page('Unknown action', 'Unknown action.'));
     } catch (e) { return res.status(500).send(page('Error', (e as Error).message)); }
