@@ -564,15 +564,16 @@ export function buildApi() {
     if (verdict) rows = rows.filter(r => r.verdict === verdict);
     if (direction) rows = rows.filter(r => r.direction === direction);
     if (status) rows = rows.filter(r => r.status === status);
-    if (from) rows = rows.filter(r => r.from.toLowerCase().includes(from));
-    if (to) rows = rows.filter(r => r.to.toLowerCase().includes(to));
+    const lc = (s: any) => String(s ?? '').toLowerCase();
+    if (from) rows = rows.filter(r => lc(r.from).includes(from));
+    if (to) rows = rows.filter(r => lc(r.to).includes(to));
     // one search box: sender, recipient, subject, or body keywords
     if (q) rows = rows.filter(r => {
       const m = emailStore.messages.get(r.id);
-      return r.from.toLowerCase().includes(q) || r.to.toLowerCase().includes(q) || r.subject.toLowerCase().includes(q) || (m?.bodyText ?? '').toLowerCase().includes(q);
+      return lc(r.from).includes(q) || lc(r.to).includes(q) || lc(r.subject).includes(q) || lc(m?.bodyText).includes(q);
     });
     // filter by a verified domain (either side of the message)
-    if (domain) rows = rows.filter(r => r.from.toLowerCase().endsWith('@' + domain) || r.from.toLowerCase().endsWith('.' + domain) || r.to.toLowerCase().endsWith('@' + domain) || r.to.toLowerCase().endsWith('.' + domain));
+    if (domain) rows = rows.filter(r => lc(r.from).endsWith('@' + domain) || lc(r.from).endsWith('.' + domain) || lc(r.to).endsWith('@' + domain) || lc(r.to).endsWith('.' + domain));
     const total = rows.length;
     const slice = rows.slice(page * per, page * per + per).map((r, i) => ({ ...r, verdictLabel: VERDICT_LABEL[r.verdict], service, idx: page * per + i }));
     res.json({ rows: slice, total, page, pages: Math.ceil(total / per) || 1 });
@@ -619,7 +620,7 @@ export function buildApi() {
       await persistScored(m, a);
       // act on the mailbox (graph mode) — find the recipient mailbox id
       const conn = getConnection(id);
-      const user = store.usersForTenant(id).find(u => u.email.toLowerCase() === m.to.toLowerCase());
+      const user = store.usersForTenant(id).find(u => u.email.toLowerCase() === String(m.to ?? "").toLowerCase());
       if (conn?.entraTenantId && user) await applyDisposition(conn.entraTenantId, user.externalId, { graphId: mid, internetMessageId: m.internetMessageId }, 'remediated');
       // optional block rule
       const option = String(req.body?.option ?? 'plain');
@@ -673,7 +674,7 @@ export function buildApi() {
   // Shared helper: find the recipient mailbox + connected tenant for a message.
   function mailboxFor(id: string, m: any) {
     const conn = getConnection(id);
-    const user = store.usersForTenant(id).find(u => u.email.toLowerCase() === m.to.toLowerCase());
+    const user = store.usersForTenant(id).find(u => u.email.toLowerCase() === String(m.to ?? "").toLowerCase());
     return { conn, user };
   }
 

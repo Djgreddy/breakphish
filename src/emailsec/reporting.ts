@@ -27,22 +27,24 @@ export function liveTracker(tenantId: string) {
   const msgs = emailStore.messagesForTenant(tenantId);
   return msgs
     .map(m => {
-      const a = emailStore.analysisFor(m.id)!;
+      const a = emailStore.analysisFor(m.id);
+      if (!a) return null; // message saved but not yet scored — skip (don't crash the log)
       // A message delivered because an admin manually released it gets a distinct
       // status so it's visually separable from auto-delivered clean mail.
       const released = a.disposition === 'deliver' && (a.releasedManually || emailStore.isReleased(m.internetMessageId));
       return {
         id: m.id,
         at: m.receivedAt,
-        from: m.fromAddress,
-        to: m.to,
-        subject: m.subject,
+        from: m.fromAddress ?? '',
+        to: m.to ?? '',
+        subject: m.subject ?? '',
         verdict: a.verdict,
         status: released ? 'released' : a.disposition,
         source: m.source,
         direction: m.direction,
       };
     })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
     .sort((x, y) => (x.at < y.at ? 1 : -1));
 }
 
