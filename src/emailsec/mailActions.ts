@@ -81,6 +81,36 @@ class GraphMailActions implements MailActions {
   async moveToDeleted(t: string, u: string, r: MsgRef) { await this.move(t, u, r, 'deleteditems'); }
 }
 
+// Where does this message currently live in the mailbox? Resolves by
+// internetMessageId (folder moves change the Graph id) and returns the folder's
+// display name — Inbox, Junk Email, Deleted Items, a quarantine folder, or a
+// user-created folder. Returns null if the message can't be found.
+const WELL_KNOWN_FOLDER: Record<string, string> = {
+  inbox: 'Inbox', junkemail: 'Junk Email', deleteditems: 'Deleted Items', sentitems: 'Sent Items',
+  drafts: 'Drafts', archive: 'Archive', clutter: 'Clutter', conversationhistory: 'Conversation History',
+};
+export async function currentFolder(entraTenantId: string, mailbox: string, internetMessageId: string, graphId?: string): Promise<string | null> {
+  try {
+    const token = await appToken(entraTenantId);
+    const base = `${GRAPH}/users/${encodeURIComponent(mailbox)}`;
+    let folderId = '';
+    if (internetMessageId) {
+      const r = await fetch(`${base}/messages?$filter=internetMessageId eq '${internetMessageId.replace(/'/g, "''")}'&$select=id,parentFolderId&$top=1`, { headers: { authorization: `Bearer ${token}` } });
+      if (r.ok) { const j: any = await r.json(); folderId = j.value?.[0]?.parentFolderId ?? ''; }
+    }
+    if (!folderId && graphId) {
+      const r = await fetch(`${base}/messages/${graphId}?$select=parentFolderId`, { headers: { authorization: `Bearer ${token}` } });
+      if (r.ok) folderId = (await r.json()).parentFolderId ?? '';
+    }
+    if (!folderId) return null; // not found — moved out of this mailbox or hard-deleted
+    const f = await fetch(`${base}/mailFolders/${folderId}?$select=displayName,wellKnownName`, { headers: { authorization: `Bearer ${token}` } });
+    if (!f.ok) return null;
+    const j: any = await f.json();
+    const wk = (j.wellKnownName ?? '').toLowerCase();
+    return WELL_KNOWN_FOLDER[wk] ?? j.displayName ?? null;
+  } catch { return null; }
+}
+
 export function makeMailActions(): MailActions {
   return config.directoryProvider === 'graph' ? new GraphMailActions() : new MockMailActions();
 }

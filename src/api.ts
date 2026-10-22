@@ -29,6 +29,7 @@ import { publicAiConfig, saveAiConfig } from './aiConfig';
 import { testLlm } from './emailsec/llm';
 import { getUsage } from './aiUsage';
 import { reprocessTenant } from './emailsec/pipeline';
+import { currentFolder } from './emailsec/mailActions';
 import { listSenderIntel, setSenderOverride, baselineReason } from './emailsec/baseline';
 import { geolocate, geoEnabled } from './emailsec/geo';
 import { publicGeoConfig, saveGeoConfig } from './geoConfig';
@@ -615,13 +616,20 @@ export function buildApi() {
     const context = a.verdict === 'clean' ? 'Clean' : (top ? (CTX[top.category] ?? top.category) : CTX[a.verdict] ?? '—');
     const rule = matchingRule(m.tenantId, m.fromAddress);
     const enrich = { queueId: m.id, senderIp: m.senderIp || '', country: m.senderCountry || '', msVerdict: m.msVerdict || '', context, rules: rule ? rule.label : '', senderIntel: baselineReason(m.tenantId, m.fromAddress), spamScore: Math.round(((a.signals ?? []).reduce((s: number, x: any) => s + (x.weight ?? 0), 0) / 14) * 100) / 100 };
+    // Live lookup: where is this message right now in the mailbox?
+    let currentFolderName: string | null = null;
+    const connF = getConnection(m.tenantId);
+    const mailbox = (m as any).mailboxUserId || m.to;
+    if (connF?.entraTenantId && mailbox && m.direction === 'inbound') {
+      try { currentFolderName = await currentFolder(connF.entraTenantId, mailbox, m.internetMessageId ?? "", m.id); } catch { /* ignore */ }
+    }
     // All mailboxes this logical message was delivered to (distribution groups).
     const recipients = [...new Set(
       [...emailStore.messages.values()]
         .filter(x => x.tenantId === m.tenantId && x.internetMessageId === m.internetMessageId && x.to)
         .map(x => x.to!)
     )];
-    res.json({ message: { ...m, transportHops: hops, recipients, toHeader: (m as any).toHeader }, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich, geoEnabled: geoEnabledFlag });
+    res.json({ message: { ...m, transportHops: hops, recipients, toHeader: (m as any).toHeader, currentFolder: currentFolderName }, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich, geoEnabled: geoEnabledFlag });
   });
 
   // Remediate a delivered message now: move it to quarantine and mark it.
