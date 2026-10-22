@@ -71,6 +71,21 @@ function msEnrichment(headers: Array<{ name: string; value: string }> = []) {
 }
 
 // Detect <a href="X">TEXT</a> where TEXT shows one domain but href goes elsewhere.
+// Legitimate email-service-providers rewrite links through their own tracking
+// domains — the visible text says one domain but the href goes through theirs.
+// That's not phishing, so ignore these hosts when checking for link mismatch.
+const ESP_LINK_HOSTS = [
+  'sendgrid.net', 'sparkpostmail.com', 'mailgun.org', 'mailchimp.com', 'list-manage.com', 'mcusercontent.com',
+  'hubspotemail.net', 'hubspotlinks.com', 'hs-sites.com', 'constantcontact.com', 'rs6.net', 'ctctcdn.com',
+  'exacttarget.com', 'exct.net', 'marketo.com', 'mktoweb.com', 'pardot.com', 'salesforce.com', 'force.com',
+  'amazonses.com', 'awstrack.me', 'sendibt.com', 'sendinblue.com', 'brevo.com', 'cmail19.com', 'cmail20.com',
+  'createsend.com', 'icontact.com', 'mailjet.com', 'mandrillapp.com', 'postmarkapp.com', 'braze.com', 'sg.email',
+  'clicks.aweber.com', 'links.notifications.auvik.com', 'click.mail', 'links.mail', 'email.mail', 'url9123.', 'go.',
+  'bounce.', 'track.', 'clicktime.symantec.com', 'protect-us.mimecast.com', 'urldefense.com', 'safelinks.protection.outlook.com',
+];
+function isEspHost(host: string): boolean {
+  return ESP_LINK_HOSTS.some(e => host === e || host.endsWith('.' + e) || host.includes(e));
+}
 function hasLinkMismatch(html: string): boolean {
   if (!html) return false;
   const re = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -83,6 +98,7 @@ function hasLinkMismatch(html: string): boolean {
     try {
       const hd = new URL(href).hostname.toLowerCase().replace(/^www\./, '');
       const td = textDom.toLowerCase().replace(/^www\./, '');
+      if (isEspHost(hd)) continue; // legit link-tracking / security-rewrite host
       if (hd && td && !hd.endsWith(td) && !td.endsWith(hd)) return true;
     } catch { /* ignore */ }
   }

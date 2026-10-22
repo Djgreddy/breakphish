@@ -141,7 +141,9 @@ export function urlScorer(m: Message): Signal[] {
     const brand = BRAND_WORDS.find(b => nhost.includes(b));
     if (brand && !COMMON_BRANDS.some(cb => reg === cb)) out.push({ code: 'url_brand_impersonation', detail: `Link host impersonates "${brand}" but isn't an official domain (${host})`, category: 'phishing', weight: 35 });
   }
-  if (m.linkMismatch) out.push({ code: 'link_text_mismatch', detail: 'A link’s visible text points to a different domain than its actual destination', category: 'phishing', weight: 45 });
+  // Link-text mismatch is FP-prone (tracked links); defer to Microsoft's verdict and
+  // keep the weight moderate so it only matters alongside other real red flags.
+  if (m.linkMismatch && !msDeemedLegit(m)) out.push({ code: 'link_text_mismatch', detail: 'A link’s visible text points to a different domain than its actual destination', category: 'phishing', weight: 28 });
   return out;
 }
 
@@ -205,12 +207,12 @@ export function contentStructureScorer(m: Message): Signal[] {
   if (payment && urgency) out.push({ code: 'bec_urgency_payment', detail: 'Urgent request involving payment / wire / gift-cards — classic BEC pattern', category: 'impersonation', weight: 45 });
   else if (payment) out.push({ code: 'payment_request', detail: 'Message requests a payment / financial action', category: 'spam', weight: 18 });
   if (credential) {
-    // Credential/2FA/security language is normal in LEGIT transactional mail, which
-    // passes DMARC and links to its own domain. Only treat it as a real phishing
-    // signal when the message isn't DMARC-authenticated (spoofable); otherwise it's
-    // informational. Lookalike/mismatch links are caught separately with full weight.
-    const authed = m.auth.dmarc === 'pass';
-    out.push({ code: 'credential_lure', detail: authed ? 'Account/security language (sender is DMARC-authenticated)' : 'Message asks you to verify credentials or account', category: 'phishing', weight: authed ? 6 : 30 });
+    // Credential/2FA/security language is normal in LEGIT transactional mail. Treat it
+    // as a real phishing signal only when the sender ISN'T authenticated/vouched —
+    // i.e. not DMARC-pass and not Microsoft-deemed-legit. Otherwise it's informational.
+    // Lookalike/mismatch links are caught separately with full weight.
+    const vouched = m.auth.dmarc === 'pass' || msDeemedLegit(m);
+    out.push({ code: 'credential_lure', detail: vouched ? 'Account/security language (authenticated sender)' : 'Message asks you to verify credentials or account', category: 'phishing', weight: vouched ? 6 : 30 });
   }
   else if (urgency) out.push({ code: 'urgency', detail: 'Urgency / pressure language', category: 'spam', weight: 10 });
   // Thread hijacking: a Re:/Fwd: from a sender we've NEVER corresponded with — in
