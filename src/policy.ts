@@ -225,7 +225,7 @@ export function hasActiveLinkRewrite(tenantId: string): boolean {
 // Decide the disposition for a scored message under the active policy.
 export function dispositionFor(
   tenantId: string, verdict: string,
-  message: { auth: { spf: string; dkim: string; dmarc: string }; attachments?: { filename: string }[]; fromAddress: string },
+  message: { auth: { spf: string; dkim: string; dmarc: string; compauth?: string }; msVerdict?: string; attachments?: { filename: string }[]; fromAddress: string },
 ): 'deliver' | 'junk' | 'quarantine' {
   // 1. allow/block overrides everything
   const ab = allowBlock(tenantId, message.fromAddress);
@@ -239,9 +239,16 @@ export function dispositionFor(
   if (verdict === 'policy_geo') act = tpl.geo.action;
   else act = tpl.verdictActions[VERDICT_KEY[verdict] ?? 'Clean'] ?? 'deliver';
 
-  // 3. auth-fail override (stricter wins)
-  if (message.auth.dmarc === 'fail' && (tpl.authActions.dmarcFail === 'reject' || tpl.authActions.dmarcFail === 'quarantine')) act = stricter(act, 'quarantine');
-  if (message.auth.spf === 'fail' && (tpl.authActions.spfFail === 'reject' || tpl.authActions.spfFail === 'quarantine')) act = stricter(act, 'quarantine');
+  // 3. auth-fail override (stricter wins) — but Microsoft already evaluates auth
+  // (compauth / ARC / forwarding). If it passed compauth or Microsoft delivered the
+  // mail as Not Spam / Bulk, raw SPF/DMARC failures are forwarding/config artifacts,
+  // not spoofing, so we DON'T quarantine on them. This prevents legit forwarded mail
+  // (which always fails SPF/DMARC) from being quarantined.
+  const msVouched = message.auth.compauth === 'pass' || /^(not spam|bulk)/i.test(message.msVerdict ?? '');
+  if (!msVouched) {
+    if (message.auth.dmarc === 'fail' && (tpl.authActions.dmarcFail === 'reject' || tpl.authActions.dmarcFail === 'quarantine')) act = stricter(act, 'quarantine');
+    if (message.auth.spf === 'fail' && (tpl.authActions.spfFail === 'reject' || tpl.authActions.spfFail === 'quarantine')) act = stricter(act, 'quarantine');
+  }
 
   // 4. executable attachment override
   if (tpl.attachments.types.includes('Executable') && (message.attachments ?? []).some(a => EXEC_EXT.includes((a.filename.slice(a.filename.lastIndexOf('.')) || '').toLowerCase())))
