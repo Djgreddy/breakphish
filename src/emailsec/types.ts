@@ -62,6 +62,7 @@ export interface Message {
   firstTimeSender: boolean;
   urls: string[];
   linkMismatch?: boolean;
+  listUnsubscribe?: boolean;        // has a List-Unsubscribe header (bulk/newsletter/notification)
   attachments: Attachment[];
 }
 

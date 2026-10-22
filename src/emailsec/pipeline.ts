@@ -79,6 +79,19 @@ function trustDiscount(scores: Record<Category, number>, m: Message): Record<Cat
   return scores;
 }
 
+// Microsoft Bulk (BCL) or a List-Unsubscribe header = bulk / newsletter / notification
+// mail → classify as Infomail (matches how gateways like Mesh tag it), so the
+// customer's Infomail policy action decides what happens to it.
+function bulkInfomailSignals(m: Message): import('./types').Signal[] {
+  if (m.direction !== 'inbound' || m.source !== 'external') return [];
+  const bulk = /bulk/i.test(m.msVerdict ?? '');
+  if (bulk || m.listUnsubscribe) {
+    const why = [bulk ? 'Microsoft Bulk' : '', m.listUnsubscribe ? 'List-Unsubscribe header' : ''].filter(Boolean).join(' + ');
+    return [{ code: 'bulk_infomail', detail: `Bulk / notification mail (${why})`, category: 'policy_infomail', weight: 50 }];
+  }
+  return [];
+}
+
 // Spam filtering sensitivity (from the active policy template) scales the spam
 // score: High flags more, Low flags less. Medium is neutral.
 function adjustSpamSensitivity(scores: Record<Category, number>, tenantId: string): Record<Category, number> {
@@ -100,7 +113,7 @@ export async function analyze(message: Message, opts: { reprocess?: boolean } = 
   emailStore.saveMessage(message);
   if (!opts.reprocess && message.direction === 'inbound' && message.source === 'external') recordScored();
 
-  let signals = [...runStaticScorers(message), ...runDetectors(message), ...baselineScorer(message), ...await contentSignals(message)];
+  let signals = [...runStaticScorers(message), ...runDetectors(message), ...baselineScorer(message), ...bulkInfomailSignals(message), ...await contentSignals(message)];
   let scores = trustDiscount(adjustSpamSensitivity(aggregate(signals), message.tenantId), message);
   let { verdict, confidence } = decideVerdict(scores);
 

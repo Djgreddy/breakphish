@@ -61,9 +61,12 @@ function msEnrichment(headers: Array<{ name: string; value: string }> = []) {
   const xorig = /\[?([0-9]{1,3}(?:\.[0-9]{1,3}){3})\]?/.exec(h('X-Originating-IP'))?.[1];
   const sfv = /SFV:([A-Z]+)/.exec(ffar)?.[1];
   const SFV: Record<string, string> = { NSPM: 'Not Spam', SPM: 'Spam', SKS: 'Skipped (rule)', BLK: 'Blocked', SKI: 'Skipped', SKN: 'Not Spam (allow)', SKQ: 'Released' };
-  const bcl = /BCL:(\d+)/.exec(h('X-Microsoft-Antispam'))?.[1];
+  const bclN = Number(/BCL:(\d+)/.exec(h('X-Microsoft-Antispam'))?.[1] ?? '0');
   let msVerdict = sfv ? (SFV[sfv] ?? sfv) : '';
-  if (!msVerdict && bcl && Number(bcl) > 0) msVerdict = `Bulk (BCL ${bcl})`;
+  // Microsoft can mark mail Not-Spam AND Bulk (BCL) at once — keep the Bulk signal
+  // so we classify it as Infomail (don't let "Not Spam" hide it).
+  if (bclN >= 4) msVerdict = msVerdict ? `${msVerdict} · Bulk (BCL ${bclN})` : `Bulk (BCL ${bclN})`;
+  else if (!msVerdict && bclN > 0) msVerdict = `Bulk (BCL ${bclN})`;
   const ctry = /CTRY:([A-Z]{2})/.exec(ffar)?.[1];
   const COUNTRY: Record<string, string> = { US: 'United States', CA: 'Canada', GB: 'United Kingdom', AU: 'Australia', DE: 'Germany', FR: 'France', NL: 'Netherlands', IN: 'India', CN: 'China', RU: 'Russia', BR: 'Brazil' };
   const country = ctry ? (COUNTRY[ctry] ?? ctry) : '';
@@ -167,6 +170,7 @@ function normalize(tenantId: string, verifiedDomains: string[], m: any, folder: 
     firstTimeSender: false,
     urls: extractUrls(bodyText),
     linkMismatch,
+    listUnsubscribe: (m.internetMessageHeaders ?? []).some((h: any) => h.name?.toLowerCase() === 'list-unsubscribe'),
     attachments: (m.attachments ?? []).map((a: any) => ({ filename: a.name, contentType: a.contentType })),
   };
 }
