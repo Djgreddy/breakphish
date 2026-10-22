@@ -1288,8 +1288,14 @@ function openRuleEditor(kind,title,r){
       // Apply To — scope the rule to the whole organization, a domain, or a user.
       b.appendChild(sField('Apply To',pairSelect(m.applyToType,[['organization','Organization'],['domain','Domain'],['user','User']],v=>{m.applyToType=v;drawApplyVal();})));
       const applyVal=el('<div></div>');b.appendChild(applyVal);
+      let ruleDomains=null; // the customer's verified domains (loaded async)
+      if(STATE.customerId){api('/customers/'+STATE.customerId).then(c=>{ruleDomains=[...new Set([c.domain,...(c.connection?.verifiedDomains||[])].filter(Boolean))];if(m.applyToType==='domain')drawApplyVal();}).catch(()=>{ruleDomains=[];if(m.applyToType==='domain')drawApplyVal();});}
       function drawApplyVal(){applyVal.innerHTML='';
-        if(m.applyToType==='domain')applyVal.appendChild(sField('Domain',sInput(m.applyToValue,v=>m.applyToValue=v,'e.g. example.com — only recipients on this domain')));
+        if(m.applyToType==='domain'){
+          if(STATE.customerId&&ruleDomains===null){applyVal.appendChild(sField('Domain',el('<div style="border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--faint);background:var(--surface2)">Loading verified domains…</div>')));}
+          else if(STATE.customerId&&ruleDomains&&ruleDomains.length){if(!m.applyToValue)m.applyToValue=ruleDomains[0];applyVal.appendChild(sField('Domain',pairSelect(m.applyToValue,ruleDomains.map(d=>[d,d]),v=>m.applyToValue=v)));}
+          else applyVal.appendChild(sField('Domain',sInput(m.applyToValue,v=>m.applyToValue=v,'e.g. example.com — only recipients on this domain')));
+        }
         else if(m.applyToType==='user')applyVal.appendChild(sField('User',sInput(m.applyToValue,v=>m.applyToValue=v,'e.g. user@example.com — only this mailbox')));
       }
       drawApplyVal();
@@ -1326,7 +1332,7 @@ async function autoRemediationView(){
   const {rules}=await api('/policy/rules?kind=auto_remediation');
   const cur=rules[0]?.data||{mode:'off',notifyTo:'Administrator'};
   const id=rules[0]?.id;
-  const v=el('<div class="card p" style="max-width:640px"></div>');
+  const v=el('<div class="card p"></div>');
   v.appendChild(el('<div style="font-size:13px;color:var(--muted);margin-bottom:16px">Automatically act on retrospective threats found in already-delivered mail. <b style="color:var(--txt)">Stored now; active remediation is a follow-up.</b></div>'));
   const seg=el('<div class="field"><label>Auto Remediation</label></div>');
   const segBar=el('<div class="seg" style="display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:9px;padding:3px"></div>');
