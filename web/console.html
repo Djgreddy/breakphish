@@ -139,6 +139,8 @@ const VERDICT_CLS={clean:'p-ok',spam:'p-warn',spam_likely:'p-warn',phishing:'p-d
 const VERDICT_BAR={clean:'var(--ok)',spam:'var(--warn)',spam_likely:'var(--warn)',phishing:'var(--danger)',malware:'var(--danger)',impersonation:'var(--danger)',policy_infomail:'var(--info)',policy_geo:'var(--info)'};
 const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p-violet',released:'p-info'};
 const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated',released:'Released'};
+// Held mail (not in the inbox) vs delivered mail — bulk actions differ, and you can't mix the two.
+function statusGroup(s){return ['quarantine','junk','remediated'].includes(s)?'held':'delivered';}
 const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
 const VERDICT_HEX={clean:'#14b8a6',spam:'#eab308',spam_likely:'#f59e0b',phishing:'#3b82f6',malware:'#ef4444',impersonation:'#8b5cf6',policy_infomail:'#06b6d4',policy_geo:'#ec4899'};
 const VERDICT_ORDER=['clean','spam','spam_likely','impersonation','malware','phishing','policy_infomail','policy_geo'];
@@ -444,7 +446,7 @@ async function trackerNode(){
   data.rows.forEach(m=>{
     const dt=new Date(m.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     const srcLabel=m.source==='internal'?'Internal':'External';
-    const row=el(`<tr><td><input type="checkbox" class="rowsel" style="cursor:pointer" ${STATE._sel.has(m.id)?'checked':''}></td><td class="mono" style="color:var(--faint);white-space:nowrap;font-size:11px">${dt}</td>
+    const row=el(`<tr><td><input type="checkbox" class="rowsel" data-id="${m.id}" data-g="${statusGroup(m.status)}" style="cursor:pointer" ${STATE._sel.has(m.id)?'checked':''}></td><td class="mono" style="color:var(--faint);white-space:nowrap;font-size:11px">${dt}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.recipientCount>1&&m.toHeader?m.toHeader:m.to}${m.recipientCount>1?` <span class="pill p-info" style="font-size:10px" title="Delivered to ${m.recipientCount} mailboxes — click View for the list">${m.recipientCount} 📬</span>`:''}</td>
       <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
@@ -454,25 +456,52 @@ async function trackerNode(){
       <td style="color:var(--muted)">${srcLabel}</td>
       <td style="text-align:right"></td></tr>`);
     const vb=el('<button class="btn sm">View</button>');vb.onclick=()=>openMessage(m.id);row.children[9].appendChild(vb);
-    const cb=row.querySelector('.rowsel');cb.onchange=()=>{if(cb.checked)STATE._sel.add(m.id);else STATE._sel.delete(m.id);updateBulkBar();};
+    const cb=row.querySelector('.rowsel');cb.onchange=()=>{
+      if(cb.checked){if(STATE._sel.size===0)STATE._selGroup=statusGroup(m.status);STATE._sel.add(m.id);}
+      else{STATE._sel.delete(m.id);if(STATE._sel.size===0)STATE._selGroup=null;}
+      syncSelectionUI();
+    };
     tb.appendChild(row);
   });
-  // bulk action bar (shown when messages are selected)
-  const bulk=el('<div id="bulkbar" style="display:none;align-items:center;gap:10px;padding:9px 14px;background:var(--surface2);border-radius:9px;margin-bottom:10px"></div>');
-  const bulkCount=el('<span style="font-weight:600;font-size:13px"></span>');
-  const bDeliver=el('<button class="btn sm ok">⤵ Deliver selected</button>');
-  const bDelete=el('<button class="btn sm danger">🗑 Delete selected</button>');
-  const bClear=el('<button class="btn sm">Clear</button>');
-  bulk.appendChild(bulkCount);bulk.appendChild(el('<div style="flex:1"></div>'));bulk.appendChild(bDeliver);bulk.appendChild(bDelete);bulk.appendChild(bClear);
+  // status-aware bulk action bar — actions mirror the View modal, and you can only
+  // bulk-act on messages that share the same status group (held vs delivered).
+  const bulk=el('<div id="bulkbar" style="display:none;align-items:center;gap:8px;padding:9px 14px;background:var(--surface2);border-radius:9px;margin-bottom:10px;flex-wrap:wrap"></div>');
   card.insertBefore(bulk,card.firstChild);
-  window.updateBulkBar=()=>{const n=STATE._sel.size;bulk.style.display=n?'flex':'none';bulkCount.textContent=n+' selected';const sa=document.getElementById('selall');if(sa)sa.checked=n>0&&data.rows.every(r=>STATE._sel.has(r.id));};
-  bClear.onclick=()=>{STATE._sel.clear();refresh();};
-  const bulkAct=async(path,label)=>{const ids=[...STATE._sel];if(!ids.length)return;if(!confirm(`${label} ${ids.length} message(s)?`))return;let ok=0;for(const id of ids){try{await api('/customers/'+STATE.customerId+'/messages/'+id+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});ok++;}catch(e){}}STATE._sel.clear();toast(`${label}: ${ok}/${ids.length} done`);refresh();};
-  bDeliver.onclick=()=>bulkAct('/release','Deliver');
-  bDelete.onclick=()=>bulkAct('/delete','Delete');
+  // dropdown action button (same UX as the View split buttons) that runs over the selection
+  function bulkSplit(label,cls,items){
+    const wrap=el('<div style="position:relative"></div>');
+    const b=el(`<button class="btn ${cls} sm">${label} ▾</button>`);
+    b.onclick=(e)=>{e.stopPropagation();const mn=el('<div></div>');mn.style.cssText='position:fixed;z-index:130;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:0 18px 44px -14px rgba(0,0,0,.5);min-width:300px';
+      items.forEach(([lbl,path,option,verb])=>{const ib=el(`<button>${lbl}</button>`);ib.style.cssText='display:block;width:100%;text-align:left;padding:9px 11px;border-radius:8px;font-size:13px';ib.onmouseover=()=>ib.style.background='var(--surface2)';ib.onmouseout=()=>ib.style.background='none';ib.onclick=()=>{mn.remove();runBulk(path,option,verb);};mn.appendChild(ib);});
+      document.body.appendChild(mn);const r=b.getBoundingClientRect();mn.style.left=Math.max(8,r.right-300)+'px';mn.style.top=(r.top-10-(items.length*42))+'px';
+      const close=()=>{mn.remove();document.removeEventListener('click',close);};setTimeout(()=>document.addEventListener('click',close),0);};
+    wrap.appendChild(b);return wrap;
+  }
+  async function runBulk(path,option,verb){const ids=[...STATE._sel];if(!ids.length)return;if(!confirm(`${verb} ${ids.length} message(s)?`))return;let ok=0;for(const id of ids){try{await api('/customers/'+STATE.customerId+'/messages/'+id+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option})});ok++;}catch(e){}}STATE._sel.clear();STATE._selGroup=null;toast(`${verb}: ${ok}/${ids.length} done`);refresh();}
+  window.syncSelectionUI=()=>{
+    const n=STATE._sel.size;bulk.style.display=n?'flex':'none';
+    // disable checkboxes whose status group doesn't match the current selection
+    document.querySelectorAll('.rowsel').forEach(cb=>{const mismatch=n>0&&cb.dataset.g!==STATE._selGroup;cb.disabled=mismatch;cb.closest('tr').style.opacity=mismatch?'0.4':'1';});
+    const sa=document.getElementById('selall');if(sa){const vis=data.rows.filter(r=>!STATE._selGroup||statusGroup(r.status)===STATE._selGroup);sa.checked=n>0&&vis.length>0&&vis.every(r=>STATE._sel.has(r.id));}
+    // rebuild action buttons for the selected group
+    bulk.innerHTML='';
+    bulk.appendChild(el(`<span style="font-weight:600;font-size:13px">${n} selected · ${STATE._selGroup==='held'?'Held':'Delivered'}</span>`));
+    bulk.appendChild(el('<div style="flex:1"></div>'));
+    if(STATE._selGroup==='held'){
+      bulk.appendChild(bulkSplit('Deliver','ok',[['Deliver','/release','plain','Deliver'],['Deliver & allow sender for recipient','/release','allow_recipient','Deliver'],['Deliver & allow sender for organization','/release','allow_org','Deliver']]));
+      bulk.appendChild(bulkSplit('Delete','danger',[['Delete','/delete','plain','Delete'],['Delete & block sender for recipient','/delete','block_recipient','Delete'],['Delete & block sender for organization','/delete','block_org','Delete']]));
+    } else {
+      bulk.appendChild(bulkSplit('Report','',[['Report false positive (deliver & allow sender)','/false-positive','recipient','Report'],['Report & allow sender org-wide','/false-positive','org','Report']]));
+      bulk.appendChild(bulkSplit('Remediate','primary',[['Remediate','/remediate','plain','Remediate'],['Remediate & block sender for recipient','/remediate','block_recipient','Remediate'],['Remediate & block sender for organization','/remediate','block_org','Remediate']]));
+    }
+    const bClear=el('<button class="btn sm">Clear</button>');bClear.onclick=()=>{STATE._sel.clear();STATE._selGroup=null;refresh();};bulk.appendChild(bClear);
+  };
   twrap.appendChild(tbl);card.appendChild(twrap);
-  const selall=tbl.querySelector('#selall');selall.onchange=()=>{if(selall.checked)data.rows.forEach(r=>STATE._sel.add(r.id));else data.rows.forEach(r=>STATE._sel.delete(r.id));refresh();};
-  setTimeout(()=>window.updateBulkBar&&window.updateBulkBar(),0);
+  const selall=tbl.querySelector('#selall');selall.onchange=()=>{
+    if(selall.checked){const vis=data.rows.filter(r=>!STATE._selGroup||statusGroup(r.status)===STATE._selGroup);if(vis.length&&!STATE._selGroup)STATE._selGroup=statusGroup(vis[0].status);vis.filter(r=>statusGroup(r.status)===STATE._selGroup).forEach(r=>STATE._sel.add(r.id));}
+    else{STATE._sel.clear();STATE._selGroup=null;}refresh();
+  };
+  setTimeout(()=>window.syncSelectionUI&&window.syncSelectionUI(),0);
   const pgOpts=[15,25,50,100].map(n=>`<option value="${n}" ${STATE.pageSize===n?'selected':''}>${n} / page</option>`).join('');
   const pager=el(`<div class="pager"><span>${data.total.toLocaleString()} messages</span><select id="psize" style="margin-left:10px;padding:5px 8px;font-size:12px">${pgOpts}</select><div style="flex:1"></div>
     <button id="pp" ${STATE.page===0?'disabled':''}>‹</button><span class="mono">${STATE.page+1}/${data.pages}</span><button id="pn" ${STATE.page>=data.pages-1?'disabled':''}>›</button></div>`);
