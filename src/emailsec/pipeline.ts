@@ -65,7 +65,7 @@ async function contentSignals(m: Message): Promise<Signal[]> {
 function trustDiscount(scores: Record<Category, number>, m: Message): Record<Category, number> {
   if (m.direction !== 'inbound' || m.source !== 'external') return scores;
   // An admin allow-listing a sender is an explicit trust decision — dampen hard.
-  if (isAllowlisted(m.tenantId, m.fromAddress)) {
+  if (isAllowlisted(m.tenantId, m.fromAddress, m.to)) {
     scores.spam = Math.round(scores.spam * 0.2);
     scores.phishing = Math.round(scores.phishing * 0.25);
     scores.impersonation = Math.round(scores.impersonation * 0.3);

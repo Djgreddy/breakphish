@@ -77,8 +77,21 @@ function ruleTargetsCustomer(r: PolicyRule, customerId: string): boolean {
 }
 // Does this rule actively apply to a given tenant right now?
 // The allow/block rule (if any) that governs a given sender for a tenant — for display.
-export function matchingRule(tenantId: string, fromAddress: string): { kind: string; label: string } | null {
-  const active = [...rules.values()].filter(r => ruleAppliesTo(r, tenantId));
+// "Apply To" scope: the rule applies org-wide, or only to a specific recipient
+// domain or user. recipient is the message's To (mailbox) when known.
+function appliesToRecipient(r: PolicyRule, recipient?: string): boolean {
+  const type = r.data.applyToType ?? 'organization';
+  if (type === 'organization' || !r.data.applyToValue) return true;
+  const to = (recipient ?? '').toLowerCase();
+  const val = String(r.data.applyToValue).toLowerCase();
+  if (!to) return true; // no recipient context → don't let scope hide the rule
+  if (type === 'user') return to === val;
+  if (type === 'domain') return to.endsWith('@' + val) || to.endsWith('.' + val) || to === val;
+  return true;
+}
+
+export function matchingRule(tenantId: string, fromAddress: string, recipient?: string): { kind: string; label: string } | null {
+  const active = [...rules.values()].filter(r => ruleAppliesTo(r, tenantId) && appliesToRecipient(r, recipient));
   const allow = active.find(r => r.kind === 'allow' && matchesSender(r, fromAddress));
   if (allow) return { kind: 'allow', label: `Allow | ${(allow.data.sender ?? (allow.data.senders ?? []).join(','))}` };
   const block = active.find(r => r.kind === 'block' && matchesSender(r, fromAddress));
@@ -182,8 +195,8 @@ function matchesSender(rule: PolicyRule, fromAddress: string): boolean {
 }
 // Allow wins over block. Only rules that actively apply to this tenant count
 // (enabled, targeted to the customer, and not opted-out by them).
-function allowBlock(tenantId: string, fromAddress: string): 'allow' | 'block' | null {
-  const active = [...rules.values()].filter(r => ruleAppliesTo(r, tenantId));
+function allowBlock(tenantId: string, fromAddress: string, recipient?: string): 'allow' | 'block' | null {
+  const active = [...rules.values()].filter(r => ruleAppliesTo(r, tenantId) && appliesToRecipient(r, recipient));
   if (active.some(r => r.kind === 'allow' && matchesSender(r, fromAddress))) return 'allow';
   if (active.some(r => r.kind === 'block' && matchesSender(r, fromAddress))) return 'block';
   return null;
@@ -228,7 +241,7 @@ export function dispositionFor(
   message: { auth: { spf: string; dkim: string; dmarc: string; compauth?: string }; msVerdict?: string; attachments?: { filename: string }[]; fromAddress: string },
 ): 'deliver' | 'junk' | 'quarantine' {
   // 1. allow/block overrides everything
-  const ab = allowBlock(tenantId, message.fromAddress);
+  const ab = allowBlock(tenantId, message.fromAddress, (message as any).to);
   if (ab === 'allow') return 'deliver';
   if (ab === 'block') return 'quarantine';
 
@@ -300,6 +313,6 @@ function seedBaseTemplates() { if (!listTemplates(['partner']).length) for (cons
 async function seedBaseTemplatesPersisted() { for (const t of baseTemplates()) { templates.set(t.id, t); await persistTemplate(t); } }
 
 // True if the sender is on an active allow list for this tenant.
-export function isAllowlisted(tenantId: string, fromAddress: string): boolean {
-  return matchingRule(tenantId, fromAddress)?.kind === 'allow';
+export function isAllowlisted(tenantId: string, fromAddress: string, recipient?: string): boolean {
+  return matchingRule(tenantId, fromAddress, recipient)?.kind === 'allow';
 }

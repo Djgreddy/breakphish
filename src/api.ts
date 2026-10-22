@@ -615,7 +615,7 @@ export function buildApi() {
     const top = (a.signals ?? []).slice().sort((x: any, y: any) => (y.weight ?? 0) - (x.weight ?? 0))[0];
     const CTX: Record<string, string> = { spam: 'Content - Spam', phishing: 'Content - Phishing', malware: 'Attachment - Malware', impersonation: 'Identity - Impersonation', policy_infomail: 'Content - Infomail', policy_geo: 'Origin - Geo', auth: 'Authentication', reputation: 'Sender Reputation', url: 'Content - URL', behavioral: 'Behavioral' };
     const context = a.verdict === 'clean' ? 'Clean' : (top ? (CTX[top.category] ?? top.category) : CTX[a.verdict] ?? '—');
-    const rule = matchingRule(m.tenantId, m.fromAddress);
+    const rule = matchingRule(m.tenantId, m.fromAddress, m.to);
     const enrich = { queueId: m.id, senderIp: m.senderIp || '', country: m.senderCountry || '', msVerdict: m.msVerdict || '', context, rules: rule ? rule.label : '', senderIntel: baselineReason(m.tenantId, m.fromAddress), spamScore: Math.round(((a.signals ?? []).reduce((s: number, x: any) => s + (x.weight ?? 0), 0) / 14) * 100) / 100 };
     // Live lookup: where is this message right now in the mailbox?
     let currentFolderName: string | null = null;

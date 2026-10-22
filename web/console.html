@@ -1262,14 +1262,11 @@ function toggleField(label,desc,on,set){const r=el(`<div style="display:flex;ali
 
 function openRuleEditor(kind,title,r){
   const d=r?r.data||{}:{};const editing=!!r;
-  const m={comment:d.comment||'',active:d.active!==false,edge:!!d.edge,setExpire:!!d.setExpire,expireDate:d.expireDate||'',sender:d.sender||'',senders:d.senders||[],ip:d.ip||[],subjects:d.subjects||[],urls:d.urls||[],headers:d.headers||[],attachmentTypes:d.attachmentTypes||[],bodyRules:d.bodyRules||[],excludeVerdicts:d.excludeVerdicts||[],allowBypass:d.allowBypass||[],action:d.action||'quarantine',preference:d.preference||0,applyToAll:d.applyToAll!==undefined?d.applyToAll:true,customerIds:d.customerIds||[],name:d.name||'',suspiciousAction:d.suspiciousAction||'Warn',maliciousAction:d.maliciousAction||'Block',excludedUrls:d.excludedUrls||[]};
+  const m={comment:d.comment||'',active:d.active!==false,edge:!!d.edge,setExpire:!!d.setExpire,expireDate:d.expireDate||'',sender:d.sender||'',senders:d.senders||[],ip:d.ip||[],subjects:d.subjects||[],urls:d.urls||[],headers:d.headers||[],attachmentTypes:d.attachmentTypes||[],bodyRules:d.bodyRules||[],excludeVerdicts:d.excludeVerdicts||[],applyToType:d.applyToType||'organization',applyToValue:d.applyToValue||'',action:d.action||'quarantine',preference:d.preference||0,applyToAll:d.applyToAll!==undefined?d.applyToAll:true,customerIds:d.customerIds||[],name:d.name||'',suspiciousAction:d.suspiciousAction||'Warn',maliciousAction:d.maliciousAction||'Block',excludedUrls:d.excludedUrls||[]};
   const modal=el(`<div class="modal" style="max-width:720px"><div class="modal-h"><h2>${editing?'Edit':'New'} ${kind==='link_rewrite'?'Link Rewrite Protection':title+' rule'}</h2><button class="modal-x" onclick="closeModal()">✕</button></div><div class="modal-b" id="rb" style="max-height:72vh;overflow:auto"></div></div>`);
   showModal(modal);const b=modal.querySelector('#rb');
   const sec=(t)=>el(`<div style="font-size:11px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 8px">${t}</div>`);
 
-  if(kind==='allow'){
-    const by=el('<div class="field"><label>Allow Rules Bypass</label></div>');by.appendChild(chipGroup(['Spam','Infomail','Impersonation','Policy-Geo'],m.allowBypass));b.appendChild(by);
-  }
   if(kind==='link_rewrite'){
     b.appendChild(sField('Name',sInput(m.name,v=>m.name=v,'e.g. Default Link Rewrite Protection')));
     b.appendChild(toggleField('Active','',m.active,v=>m.active=v));
@@ -1288,7 +1285,14 @@ function openRuleEditor(kind,title,r){
     }
     if(kind==='allow'||kind==='block'){
       b.appendChild(toggleField('Active','',m.active,v=>m.active=v));
-      b.appendChild(toggleField('Edge',kind==='block'?'Reject connections from sender (can take up to 1 hour).':'Bypass rejected statuses (can take up to 1 hour).',m.edge,v=>m.edge=v));
+      // Apply To — scope the rule to the whole organization, a domain, or a user.
+      b.appendChild(sField('Apply To',pairSelect(m.applyToType,[['organization','Organization'],['domain','Domain'],['user','User']],v=>{m.applyToType=v;drawApplyVal();})));
+      const applyVal=el('<div></div>');b.appendChild(applyVal);
+      function drawApplyVal(){applyVal.innerHTML='';
+        if(m.applyToType==='domain')applyVal.appendChild(sField('Domain',sInput(m.applyToValue,v=>m.applyToValue=v,'e.g. example.com — only recipients on this domain')));
+        else if(m.applyToType==='user')applyVal.appendChild(sField('User',sInput(m.applyToValue,v=>m.applyToValue=v,'e.g. user@example.com — only this mailbox')));
+      }
+      drawApplyVal();
       b.appendChild(toggleField('Set Expire Date','',m.setExpire,v=>m.setExpire=v));
       b.appendChild(sField('Expire date',sInput(m.expireDate,v=>m.expireDate=v,'YYYY-MM-DD HH:mm')));
       b.appendChild(sField('Sender',sInput(m.sender,v=>m.sender=v,'sender email or domain (wildcards: *.name.tld)')));
