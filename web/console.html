@@ -141,6 +141,19 @@ const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p
 const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated',released:'Released'};
 // Held mail (not in the inbox) vs delivered mail — bulk actions differ, and you can't mix the two.
 function statusGroup(s){return ['quarantine','junk','remediated'].includes(s)?'held':'delivered';}
+// One shared dropdown: clicking the same button toggles it, clicking another closes
+// the first, and an outside click closes it. items = [[label, fn], ...].
+let _ddMenu=null,_ddBtn=null;
+function closeDD(){if(_ddMenu){_ddMenu.remove();_ddMenu=null;_ddBtn=null;}}
+function openDD(btn,items){
+  if(_ddBtn===btn){closeDD();return;}            // same button → toggle off
+  closeDD();                                       // any other open menu → close it
+  const mn=el('<div></div>');mn.style.cssText='position:fixed;z-index:200;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:0 18px 44px -14px rgba(0,0,0,.5);min-width:300px';
+  items.forEach(([lbl,fn])=>{const ib=el(`<button>${lbl}</button>`);ib.style.cssText='display:block;width:100%;text-align:left;padding:9px 11px;border-radius:8px;font-size:13px';ib.onmouseover=()=>ib.style.background='var(--surface2)';ib.onmouseout=()=>ib.style.background='none';ib.onclick=(ev)=>{ev.stopPropagation();closeDD();fn();};mn.appendChild(ib);});
+  document.body.appendChild(mn);const r=btn.getBoundingClientRect();mn.style.left=Math.max(8,r.right-300)+'px';mn.style.top=Math.max(8,r.top-10-(items.length*42))+'px';
+  _ddMenu=mn;_ddBtn=btn;
+}
+document.addEventListener('click',e=>{if(_ddMenu&&!_ddMenu.contains(e.target)&&_ddBtn&&!_ddBtn.contains(e.target))closeDD();});
 const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
 const VERDICT_HEX={clean:'#14b8a6',spam:'#eab308',spam_likely:'#f59e0b',phishing:'#3b82f6',malware:'#ef4444',impersonation:'#8b5cf6',policy_infomail:'#06b6d4',policy_geo:'#ec4899'};
 const VERDICT_ORDER=['clean','spam','spam_likely','impersonation','malware','phishing','policy_infomail','policy_geo'];
@@ -471,10 +484,7 @@ async function trackerNode(){
   function bulkSplit(label,cls,items){
     const wrap=el('<div style="position:relative"></div>');
     const b=el(`<button class="btn ${cls} sm">${label} ▾</button>`);
-    b.onclick=(e)=>{e.stopPropagation();const mn=el('<div></div>');mn.style.cssText='position:fixed;z-index:130;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:0 18px 44px -14px rgba(0,0,0,.5);min-width:300px';
-      items.forEach(([lbl,path,option,verb])=>{const ib=el(`<button>${lbl}</button>`);ib.style.cssText='display:block;width:100%;text-align:left;padding:9px 11px;border-radius:8px;font-size:13px';ib.onmouseover=()=>ib.style.background='var(--surface2)';ib.onmouseout=()=>ib.style.background='none';ib.onclick=()=>{mn.remove();runBulk(path,option,verb);};mn.appendChild(ib);});
-      document.body.appendChild(mn);const r=b.getBoundingClientRect();mn.style.left=Math.max(8,r.right-300)+'px';mn.style.top=(r.top-10-(items.length*42))+'px';
-      const close=()=>{mn.remove();document.removeEventListener('click',close);};setTimeout(()=>document.addEventListener('click',close),0);};
+    b.onclick=(e)=>{e.stopPropagation();openDD(b,items.map(([lbl,path,option,verb])=>[lbl,()=>runBulk(path,option,verb)]));};
     wrap.appendChild(b);return wrap;
   }
   async function runBulk(path,option,verb){const ids=[...STATE._sel];if(!ids.length)return;if(!confirm(`${verb} ${ids.length} message(s)?`))return;let ok=0;for(const id of ids){try{await api('/customers/'+STATE.customerId+'/messages/'+id+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option})});ok++;}catch(e){}}STATE._sel.clear();STATE._selGroup=null;toast(`${verb}: ${ok}/${ids.length} done`);refresh();}
@@ -627,12 +637,7 @@ async function openMessage(id){
   function splitBtn(label,cls,items){
     const wrap=el('<div style="position:relative"></div>');
     const b=el(`<button class="btn ${cls} sm">${label} ▾</button>`);
-    b.onclick=(e)=>{e.stopPropagation();
-      const mn=el('<div></div>');mn.style.cssText='position:fixed;z-index:130;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:6px;box-shadow:0 18px 44px -14px rgba(0,0,0,.5);min-width:300px';
-      items.forEach(([lbl,fn])=>{const ib=el(`<button>${lbl}</button>`);ib.style.cssText='display:block;width:100%;text-align:left;padding:9px 11px;border-radius:8px;font-size:13px';ib.onmouseover=()=>ib.style.background='var(--surface2)';ib.onmouseout=()=>ib.style.background='none';ib.onclick=()=>{mn.remove();fn();};mn.appendChild(ib);});
-      document.body.appendChild(mn);const r=b.getBoundingClientRect();mn.style.left=Math.max(8,r.right-300)+'px';mn.style.top=(r.top-10-(items.length*40))+'px';
-      const close=()=>{mn.remove();document.removeEventListener('click',close);};setTimeout(()=>document.addEventListener('click',close),0);
-    };
+    b.onclick=(e)=>{e.stopPropagation();openDD(b,items);};
     wrap.appendChild(b);return wrap;
   }
   const act=async(path,option,msg)=>{try{await api('/customers/'+STATE.customerId+'/messages/'+id+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option})});closeModal();toast(msg);refresh&&refresh();}catch(e){toast('Failed: '+e.message);}};
