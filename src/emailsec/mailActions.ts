@@ -89,26 +89,36 @@ const WELL_KNOWN_FOLDER: Record<string, string> = {
   inbox: 'Inbox', junkemail: 'Junk Email', deleteditems: 'Deleted Items', sentitems: 'Sent Items',
   drafts: 'Drafts', archive: 'Archive', clutter: 'Clutter', conversationhistory: 'Conversation History',
 };
-export async function currentFolder(entraTenantId: string, mailbox: string, internetMessageId: string, graphId?: string): Promise<string | null> {
+export async function currentFolder(entraTenantId: string, mailbox: string, internetMessageId: string, graphId?: string): Promise<{ folder: string | null; note?: string }> {
   try {
     const token = await appToken(entraTenantId);
+    const H = { authorization: `Bearer ${token}` };
     const base = `${GRAPH}/users/${encodeURIComponent(mailbox)}`;
-    let folderId = '';
-    if (internetMessageId) {
-      const r = await fetch(`${base}/messages?$filter=internetMessageId eq '${internetMessageId.replace(/'/g, "''")}'&$select=id,parentFolderId&$top=1`, { headers: { authorization: `Bearer ${token}` } });
-      if (r.ok) { const j: any = await r.json(); folderId = j.value?.[0]?.parentFolderId ?? ''; }
-    }
-    if (!folderId && graphId) {
-      const r = await fetch(`${base}/messages/${graphId}?$select=parentFolderId`, { headers: { authorization: `Bearer ${token}` } });
+    let folderId = '', note = '';
+
+    // 1. Direct lookup by the stored Graph id — reliable while the message hasn't
+    //    moved (true in monitor mode). IDs contain + / = so they must be encoded.
+    if (graphId) {
+      const r = await fetch(`${base}/messages/${encodeURIComponent(graphId)}?$select=parentFolderId`, { headers: H });
       if (r.ok) folderId = (await r.json()).parentFolderId ?? '';
+      else if (r.status !== 404) note = `id ${r.status}`;
     }
-    if (!folderId) return null; // not found — moved out of this mailbox or hard-deleted
-    const f = await fetch(`${base}/mailFolders/${folderId}?$select=displayName,wellKnownName`, { headers: { authorization: `Bearer ${token}` } });
-    if (!f.ok) return null;
+    // 2. Fall back to searching by internetMessageId (the id changes when a message
+    //    moves folders). The whole $filter value must be URL-encoded (spaces, <>, @).
+    if (!folderId && internetMessageId) {
+      const filter = `internetMessageId eq '${internetMessageId.replace(/'/g, "''")}'`;
+      const r = await fetch(`${base}/messages?$filter=${encodeURIComponent(filter)}&$select=parentFolderId&$top=1`, { headers: H });
+      if (r.ok) { const j: any = await r.json(); folderId = j.value?.[0]?.parentFolderId ?? ''; if (!folderId) note = note || 'not in mailbox'; }
+      else note = `search ${r.status}: ${(await r.text()).slice(0, 120)}`;
+    }
+    if (!folderId) return { folder: null, note: note || 'not found' };
+
+    const f = await fetch(`${base}/mailFolders/${encodeURIComponent(folderId)}?$select=displayName,wellKnownName`, { headers: H });
+    if (!f.ok) return { folder: null, note: `folder ${f.status}` };
     const j: any = await f.json();
     const wk = (j.wellKnownName ?? '').toLowerCase();
-    return WELL_KNOWN_FOLDER[wk] ?? j.displayName ?? null;
-  } catch { return null; }
+    return { folder: WELL_KNOWN_FOLDER[wk] ?? j.displayName ?? null };
+  } catch (e) { return { folder: null, note: 'error: ' + (e as Error).message }; }
 }
 
 export function makeMailActions(): MailActions {
