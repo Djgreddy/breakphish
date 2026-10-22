@@ -48,6 +48,7 @@ export function liveTracker(tenantId: string) {
         at: m.receivedAt,
         from: m.fromAddress ?? '',
         to: recips[0] ?? (m.to ?? ''),
+        toHeader: m.toHeader ?? '',   // original addressed-to (e.g. the distro group)
         recipients: recips,
         recipientCount: recips.length,
         subject: m.subject ?? '',

@@ -435,7 +435,7 @@ async function trackerNode(){
     const srcLabel=m.source==='internal'?'Internal':'External';
     const row=el(`<tr><td class="mono" style="color:var(--faint);white-space:nowrap;font-size:11px">${dt}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.to}${m.recipientCount>1?` <span class="pill p-muted" style="font-size:10px" title="Delivered to ${m.recipientCount} mailboxes">+${m.recipientCount-1}</span>`:''}</td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.recipientCount>1&&m.toHeader?m.toHeader:m.to}${m.recipientCount>1?` <span class="pill p-info" style="font-size:10px" title="Delivered to ${m.recipientCount} mailboxes — click View for the list">${m.recipientCount} 📬</span>`:''}</td>
       <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
       <td><span class="pill ${VERDICT_CLS[m.verdict]}">${m.verdictLabel}</span></td>
       <td><span class="pill ${DISP_CLS[m.status]}">${STATE._mode==='passive'&&['junk','quarantine','remediated'].includes(m.status)?'Would '+DISP_LABEL[m.status].toLowerCase():DISP_LABEL[m.status]}</span></td>
