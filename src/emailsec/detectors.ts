@@ -9,6 +9,7 @@ import type { Message, Signal } from './types';
 import { store } from '../store';
 import { senderStat } from './baseline';
 import { detectionFlags } from '../policy';
+import { msDeemedLegit } from './scorers';
 
 const COMMON_BRANDS = [
   'microsoft.com', 'office365.com', 'outlook.com', 'live.com', 'google.com', 'gmail.com',
@@ -172,7 +173,7 @@ export function attachmentScorer(m: Message): Signal[] {
 // Authentication depth: alignment, not just pass/fail.
 export function authDepthScorer(m: Message): Signal[] {
   if (m.direction !== 'inbound' || m.source !== 'external') return [];
-  if (m.auth.compauth === 'pass') return []; // Microsoft composite-authenticated — legit despite mechanism fails
+  if (msDeemedLegit(m)) return []; // Microsoft vouched (compauth / Not-Spam / Bulk) — don't flag alignment
   const fromDom = domainOf(m.fromAddress);
   const own = (store.getTenant(m.tenantId)?.verifiedDomains ?? []).map(d => d.toLowerCase());
   // Someone sending AS your own domain, from outside, without passing DMARC — spoofing you.

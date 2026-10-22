@@ -10,11 +10,20 @@ const KNOWN_EXECS = ['David Chen', 'COMHOME Admin', 'Alice Nguyen'];
 
 const MALWARE_EXTS = ['.exe', '.zip', '.iso', '.html', '.htm', '.js', '.scr'];
 
+// Microsoft already evaluates authentication (incl. composite auth / ARC / forwarding)
+// and classifies the message. If it passed compauth, or Microsoft delivered it as
+// Not Spam / Bulk, the raw SPF/DKIM/DMARC failures are forwarding/config artifacts,
+// not spoofing — don't re-penalize them. BreakPhish's value is the content/behavioral
+// layer (lookalike, impersonation, LLM intent), which still runs regardless.
+export function msDeemedLegit(m: Message): boolean {
+  if (m.auth.compauth === 'pass') return true;
+  const v = (m.msVerdict ?? '').toLowerCase();
+  return v.startsWith('not spam') || v.startsWith('bulk');
+}
+
 export function authScorer(m: Message): Signal[] {
   const out: Signal[] = [];
-  // Microsoft composite auth passed → sender is legitimate even if raw SPF/DKIM/DMARC
-  // fail (forwarded / relayed / mailing-list mail). Don't penalize the mechanism fails.
-  if (m.auth.compauth === 'pass') return out;
+  if (msDeemedLegit(m)) return out; // Microsoft vouched for auth — don't re-penalize
   if (m.auth.dmarc === 'fail') {
     out.push({ code: 'dmarc_fail', detail: 'DMARC alignment failed', category: 'phishing', weight: 35 });
   }
