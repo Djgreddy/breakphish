@@ -96,9 +96,9 @@ function isAmbiguous(verdict: Verdict, confidence: number): boolean {
   return confidence < 0.85;                             // spam/infomail with soft confidence
 }
 
-export async function analyze(message: Message): Promise<Analysis> {
+export async function analyze(message: Message, opts: { reprocess?: boolean } = {}): Promise<Analysis> {
   emailStore.saveMessage(message);
-  if (message.direction === 'inbound' && message.source === 'external') recordScored();
+  if (!opts.reprocess && message.direction === 'inbound' && message.source === 'external') recordScored();
 
   let signals = [...runStaticScorers(message), ...runDetectors(message), ...baselineScorer(message), ...await contentSignals(message)];
   let scores = trustDiscount(adjustSpamSensitivity(aggregate(signals), message.tenantId), message);
@@ -106,7 +106,7 @@ export async function analyze(message: Message): Promise<Analysis> {
 
   // Newly-registered domain check — only for first-contact external senders (cached),
   // and only when the customer's policy has it enabled.
-  if (message.direction === 'inbound' && message.source === 'external' && detectionFlags(message.tenantId).newDomain) {
+  if (!opts.reprocess && message.direction === 'inbound' && message.source === 'external' && detectionFlags(message.tenantId).newDomain) {
     const st = senderStat(message.tenantId, message.fromAddress);
     if (!st || st.inbound === 0) {
       const days = await domainAgeDays(message.fromAddress.split('@')[1] ?? '');
@@ -153,7 +153,7 @@ export async function analyze(message: Message): Promise<Analysis> {
     signals,
   };
   emailStore.saveAnalysis(analysis);
-  learn(message); // update the behavioral baseline with this correspondence
+  if (!opts.reprocess) learn(message); // update the behavioral baseline with this correspondence
   await persistScored(message, analysis); // durably store the message + its verdict
   return analysis;
 }
@@ -163,4 +163,18 @@ export async function ingestBatch(messages: Message[]): Promise<Analysis[]> {
   const out: Analysis[] = [];
   for (const m of messages) out.push(await analyze(m));
   return out;
+}
+
+// Re-score every stored message for a tenant with the CURRENT logic, without
+// re-fetching from Graph or taking any mailbox actions. Applies accumulated
+// detection/policy fixes to mail that was scored under older rules.
+export async function reprocessTenant(tenantId: string): Promise<{ processed: number; changed: number }> {
+  const msgs = emailStore.messagesForTenant(tenantId);
+  let changed = 0;
+  for (const m of msgs) {
+    const before = emailStore.analysisFor(m.id)?.disposition;
+    const a = await analyze(m, { reprocess: true });
+    if (a.disposition !== before) changed++;
+  }
+  return { processed: msgs.length, changed };
 }

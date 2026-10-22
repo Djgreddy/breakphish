@@ -28,6 +28,7 @@ import { appToken } from './directory/graphProvider';
 import { publicAiConfig, saveAiConfig } from './aiConfig';
 import { testLlm } from './emailsec/llm';
 import { getUsage } from './aiUsage';
+import { reprocessTenant } from './emailsec/pipeline';
 import { listSenderIntel, setSenderOverride, baselineReason } from './emailsec/baseline';
 import { geolocate, geoEnabled } from './emailsec/geo';
 import { publicGeoConfig, saveGeoConfig } from './geoConfig';
@@ -431,6 +432,15 @@ export function buildApi() {
     const c = getCustomer(req.params.id);
     if (!c) return res.status(404).json({ error: 'not found' });
     res.json(customerSummary(c));
+  });
+
+  // Re-score all of a customer's stored mail with the current rules (no Graph calls).
+  api.post('/customers/:id/reprocess', requirePartner, async (req, res) => {
+    try {
+      const r = await reprocessTenant(req.params.id);
+      logReq(req, 'mail.reprocess', req.params.id, `${r.changed}/${r.processed} changed`);
+      res.json(r);
+    } catch (e) { res.status(500).json({ error: (e as Error).message }); }
   });
 
   // Set enforcement mode (partner only): passive (monitor) ↔ active (enforce).

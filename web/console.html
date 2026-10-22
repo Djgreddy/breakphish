@@ -479,7 +479,7 @@ async function openMessage(id){
       ${kv('Verdict',`<span class="pill ${VERDICT_CLS[a.verdict]}">${d.verdictLabel}</span>`)}
       ${kv('Microsoft Verdict',en.msVerdict?`<span class="pill p-muted">${en.msVerdict}</span>`:'—')}
       ${kv('Context',en.context?`<span class="pill p-warn">${en.context}</span>`:'—')}
-      ${kv('SPF',authPill(m.auth.spf))}${kv('DKIM',authPill(m.auth.dkim))}${kv('DMARC',authPill(m.auth.dmarc))}${m.auth.compauth&&m.auth.compauth!=='none'?kv('Composite Auth',authPill(m.auth.compauth==='pass'?'pass':m.auth.compauth==='fail'?'fail':'none')+'<span style="color:var(--faint);font-size:11px;margin-left:8px">Microsoft\'s overall auth verdict</span>'):''}${(m.auth.compauth==='pass'&&(m.auth.spf==='fail'||m.auth.dkim==='fail'||m.auth.dmarc==='fail'))?`<tr><td colspan="2" style="padding:8px 14px;background:var(--info-bg);font-size:12px;color:var(--muted)">ℹ️ SPF/DKIM/DMARC failed at the final hop (this message was relayed/forwarded), but Microsoft composite auth passed — the sender's domain is legitimate. BreakPhish treats this as authenticated.</td></tr>`:''}
+      ${kv('SPF',authPill(m.auth.spf))}${kv('DKIM',authPill(m.auth.dkim))}${kv('DMARC',authPill(m.auth.dmarc))}${m.auth.compauth&&m.auth.compauth!=='none'?kv('Composite Auth',authPill(m.auth.compauth==='pass'?'pass':'fail')+'<span style="color:var(--faint);font-size:11px;margin-left:8px">Microsoft\'s overall auth verdict</span>'):''}${(()=>{const vouched=m.auth.compauth==='pass'||/^(not spam|bulk)/i.test(en.msVerdict||'');const authFail=m.auth.spf==='fail'||m.auth.dkim==='fail'||m.auth.dmarc==='fail';return (vouched&&authFail)?`<tr><td colspan="2" style="padding:8px 14px;background:var(--info-bg);font-size:12px;color:var(--muted)">ℹ️ SPF/DKIM/DMARC failed at the final hop (this message was relayed or forwarded — e.g. through an upstream gateway), but <b>Microsoft classified it as ${esc(en.msVerdict||'legitimate')}</b>. The sender's domain is fine; BreakPhish treats this as authenticated and won't quarantine on the raw auth failures.</td></tr>`:'';})()}
       ${kv('Spam Score',`<span class="mono">${(en.spamScore!=null?en.spamScore:spamScore/14).toFixed(2)}</span>`)}
       ${kv('Rule(s)',en.rules?`<span class="mono" style="font-size:12px">${en.rules}</span>`:'—')}
       ${kv('Sender (AI baseline)',en.senderIntel?`<span class="pill p-muted">${en.senderIntel}</span>`:'—')}
@@ -1632,6 +1632,7 @@ function openRowMenu(btn,c){
     connected?{label:'↻  Azure Sync', onClick:()=>resyncCustomer(c)}:null,
     connected?{label:'⟳  O365 Reauthorize', onClick:()=>reauth(c)}:null,
     connected?{label:'🧠  Sender Intelligence', onClick:()=>{STATE._intelCust=c;go('sender-intel');}}:null,
+    connected?{label:'↻  Re-score mail (apply latest rules)', onClick:()=>rescoreCustomer(c)}:null,
     {label:'⇄  Switch Service', onClick:()=>toast('Switching service (Gateway/Unified) — coming soon')},
     {label:'✕  Delete customer', danger:true, onClick:()=>deleteCust(c)},
   ].filter(Boolean);
@@ -1643,6 +1644,7 @@ function openRowMenu(btn,c){
   m.style.top=(r.bottom+4)+'px';m.style.left=Math.max(8,r.right-200)+'px';
   window._rm=m;
 }
+async function rescoreCustomer(c){if(!confirm(`Re-score all stored mail for ${c.name} with the current detection rules? This re-evaluates existing messages (no Graph calls) so recent fixes apply to old mail.`))return;toast('Re-scoring…');try{const r=await api('/customers/'+c.id+'/reprocess',{method:'POST'});toast(`Re-scored ${r.processed} messages, ${r.changed} changed`);go('customers');}catch(e){toast('Re-score failed: '+e.message);}}
 async function resyncCustomer(c){try{const r=await api('/customers/'+c.id+'/resync',{method:'POST'});toast(`Synced ${r.users} users, scored ${r.scored} new`);go('customers');}catch(e){toast('Re-sync failed: '+e.message);}}
 async function setMode(c,mode){
   const msg=mode==='active'?`Activate protection for ${c.name}? BreakPhish will start enforcing (quarantine, junk, banners) on their mail.`:`Switch ${c.name} to monitor mode? BreakPhish will keep scoring and learning but stop acting on their mail.`;
