@@ -140,6 +140,15 @@ const VERDICT_BAR={clean:'var(--ok)',spam:'var(--warn)',spam_likely:'var(--warn)
 const DISP_CLS={deliver:'p-ok',junk:'p-warn',quarantine:'p-danger',remediated:'p-violet',released:'p-info'};
 const DISP_LABEL={deliver:'Deliver',junk:'Junk',quarantine:'Quarantine',remediated:'Remediated',released:'Released'};
 const VERDICT_LABEL={clean:'Clean',spam:'Spam',spam_likely:'Spam-Likely',phishing:'Phishing',malware:'Malware',impersonation:'Impersonation',policy_infomail:'Policy — Infomail',policy_geo:'Policy — Geo'};
+const VERDICT_HEX={clean:'#14b8a6',spam:'#eab308',spam_likely:'#f59e0b',phishing:'#3b82f6',malware:'#ef4444',impersonation:'#8b5cf6',policy_infomail:'#06b6d4',policy_geo:'#ec4899'};
+const VERDICT_ORDER=['clean','spam','spam_likely','impersonation','malware','phishing','policy_infomail','policy_geo'];
+// a horizontal stacked bar: outer width = total/max, inner segments colored by verdict
+function stackedBar(byVerdict,max){
+  const total=Object.values(byVerdict||{}).reduce((s,n)=>s+n,0)||1;
+  const segs=VERDICT_ORDER.filter(v=>byVerdict&&byVerdict[v]).map(v=>`<div style="width:${byVerdict[v]/total*100}%;background:${VERDICT_HEX[v]}" title="${VERDICT_LABEL[v]}: ${byVerdict[v]}"></div>`).join('');
+  return `<div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;display:flex;width:${Math.max(2,Math.round(total/max*100))}%">${segs}</div></div>`;
+}
+function verdictLegend(){return `<div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11.5px;color:var(--muted);margin-top:4px">${VERDICT_ORDER.map(v=>`<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:${VERDICT_HEX[v]};display:inline-block"></span>${VERDICT_LABEL[v]}</span>`).join('')}</div>`;}
 
 const STATE={role:'partner',customerId:null,view:'customers',filterText:'',filterVerdict:'',filterFrom:'',filterTo:'',filterDir:'',filterStatus:'',filterRange:'all',filterDomain:'',dateFrom:'',dateTo:'',page:0,pageSize:25,session:null};
 let PRESET_STATUS=null;
@@ -382,7 +391,7 @@ VIEWS.dashboard=async function(){
   const tm=el('<div class="card"><div class="card-h"><h3>Targeted Mailboxes</h3></div></div>');
   const tmb=el('<div style="padding:6px 18px 14px"></div>');
   const tmMax=Math.max(1,...d.targetedMailboxes.map(t=>t.count));
-  d.targetedMailboxes.forEach(t=>tmb.appendChild(el(`<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span style="color:var(--brand);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.mailbox}</span><span class="mono" style="color:var(--muted)">${t.count.toLocaleString()}</span></div><div style="height:7px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.round(t.count/tmMax*100)}%;background:var(--warn)"></div></div></div>`)));
+  d.targetedMailboxes.forEach(t=>tmb.appendChild(el(`<div style="margin:7px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span style="color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.mailbox}</span><span class="mono" style="color:var(--muted)">${t.count.toLocaleString()}</span></div>${t.byVerdict?stackedBar(t.byVerdict,tmMax):`<div style="height:7px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.round(t.count/tmMax*100)}%;background:var(--warn)"></div></div>`}</div>`)));
   if(!d.targetedMailboxes.length)tmb.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No data yet.</div>'));
   tm.appendChild(tmb);grid.appendChild(tm);
   v.appendChild(grid);
@@ -428,13 +437,14 @@ async function trackerNode(){
   filt.querySelector('#fverd').onchange=e=>{STATE.filterVerdict=e.target.value;STATE.page=0;refresh();};
   card.appendChild(filt);
   const twrap=el('<div class="tablewrap"></div>');
-  const tbl=el(`<table style="min-width:900px"><thead><tr><th style="width:120px">Date</th><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th>Status</th><th>Service</th><th>Source</th><th></th></tr></thead><tbody></tbody></table>`);
+  if(!STATE._sel)STATE._sel=new Set();
+  const tbl=el(`<table style="min-width:940px"><thead><tr><th style="width:34px"><input type="checkbox" id="selall" style="cursor:pointer"></th><th style="width:118px">Date</th><th>From</th><th>To</th><th>Subject</th><th>Verdict</th><th>Status</th><th>Service</th><th>Source</th><th></th></tr></thead><tbody></tbody></table>`);
   const tb=tbl.querySelector('tbody');
-  if(!data.rows.length)tb.appendChild(el('<tr><td colspan="9" style="padding:36px;text-align:center;color:var(--faint)">No messages match.</td></tr>'));
+  if(!data.rows.length)tb.appendChild(el('<tr><td colspan="10" style="padding:36px;text-align:center;color:var(--faint)">No messages match.</td></tr>'));
   data.rows.forEach(m=>{
     const dt=new Date(m.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
     const srcLabel=m.source==='internal'?'Internal':'External';
-    const row=el(`<tr><td class="mono" style="color:var(--faint);white-space:nowrap;font-size:11px">${dt}</td>
+    const row=el(`<tr><td><input type="checkbox" class="rowsel" style="cursor:pointer" ${STATE._sel.has(m.id)?'checked':''}></td><td class="mono" style="color:var(--faint);white-space:nowrap;font-size:11px">${dt}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.from}</td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${m.recipientCount>1&&m.toHeader?m.toHeader:m.to}${m.recipientCount>1?` <span class="pill p-info" style="font-size:10px" title="Delivered to ${m.recipientCount} mailboxes — click View for the list">${m.recipientCount} 📬</span>`:''}</td>
       <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.subject}</td>
@@ -443,10 +453,26 @@ async function trackerNode(){
       <td style="color:var(--muted)"><span class="pill p-muted" style="font-weight:500">${m.service||'—'}</span></td>
       <td style="color:var(--muted)">${srcLabel}</td>
       <td style="text-align:right"></td></tr>`);
-    const vb=el('<button class="btn sm">View</button>');vb.onclick=()=>openMessage(m.id);row.children[8].appendChild(vb);
+    const vb=el('<button class="btn sm">View</button>');vb.onclick=()=>openMessage(m.id);row.children[9].appendChild(vb);
+    const cb=row.querySelector('.rowsel');cb.onchange=()=>{if(cb.checked)STATE._sel.add(m.id);else STATE._sel.delete(m.id);updateBulkBar();};
     tb.appendChild(row);
   });
+  // bulk action bar (shown when messages are selected)
+  const bulk=el('<div id="bulkbar" style="display:none;align-items:center;gap:10px;padding:9px 14px;background:var(--surface2);border-radius:9px;margin-bottom:10px"></div>');
+  const bulkCount=el('<span style="font-weight:600;font-size:13px"></span>');
+  const bDeliver=el('<button class="btn sm ok">⤵ Deliver selected</button>');
+  const bDelete=el('<button class="btn sm danger">🗑 Delete selected</button>');
+  const bClear=el('<button class="btn sm">Clear</button>');
+  bulk.appendChild(bulkCount);bulk.appendChild(el('<div style="flex:1"></div>'));bulk.appendChild(bDeliver);bulk.appendChild(bDelete);bulk.appendChild(bClear);
+  card.insertBefore(bulk,card.firstChild);
+  window.updateBulkBar=()=>{const n=STATE._sel.size;bulk.style.display=n?'flex':'none';bulkCount.textContent=n+' selected';const sa=document.getElementById('selall');if(sa)sa.checked=n>0&&data.rows.every(r=>STATE._sel.has(r.id));};
+  bClear.onclick=()=>{STATE._sel.clear();refresh();};
+  const bulkAct=async(path,label)=>{const ids=[...STATE._sel];if(!ids.length)return;if(!confirm(`${label} ${ids.length} message(s)?`))return;let ok=0;for(const id of ids){try{await api('/customers/'+STATE.customerId+'/messages/'+id+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({option:'plain'})});ok++;}catch(e){}}STATE._sel.clear();toast(`${label}: ${ok}/${ids.length} done`);refresh();};
+  bDeliver.onclick=()=>bulkAct('/release','Deliver');
+  bDelete.onclick=()=>bulkAct('/delete','Delete');
   twrap.appendChild(tbl);card.appendChild(twrap);
+  const selall=tbl.querySelector('#selall');selall.onchange=()=>{if(selall.checked)data.rows.forEach(r=>STATE._sel.add(r.id));else data.rows.forEach(r=>STATE._sel.delete(r.id));refresh();};
+  setTimeout(()=>window.updateBulkBar&&window.updateBulkBar(),0);
   const pgOpts=[15,25,50,100].map(n=>`<option value="${n}" ${STATE.pageSize===n?'selected':''}>${n} / page</option>`).join('');
   const pager=el(`<div class="pager"><span>${data.total.toLocaleString()} messages</span><select id="psize" style="margin-left:10px;padding:5px 8px;font-size:12px">${pgOpts}</select><div style="flex:1"></div>
     <button id="pp" ${STATE.page===0?'disabled':''}>‹</button><span class="mono">${STATE.page+1}/${data.pages}</span><button id="pn" ${STATE.page>=data.pages-1?'disabled':''}>›</button></div>`);
@@ -889,15 +915,17 @@ async function analyticsView(){
   const geoC=el('<div class="card"><div class="card-h"><h3>Geo (sender country)</h3></div></div>');
   const geoB=el('<div style="padding:6px 18px 14px"></div>');
   const geoMax=Math.max(1,...a.geo.map(g=>g.count));
-  a.geo.forEach(g=>geoB.appendChild(el(`<div style="margin:8px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px"><span>${g.country}</span><span class="mono" style="color:var(--muted)">${g.count.toLocaleString()}</span></div><div style="height:6px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.round(g.count/geoMax*100)}%;background:var(--warn)"></div></div></div>`)));
+  a.geo.forEach(g=>geoB.appendChild(el(`<div style="margin:9px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px"><span>${g.country}</span><span class="mono" style="color:var(--muted)">${g.count.toLocaleString()}</span></div>${stackedBar(g.byVerdict,geoMax)}</div>`)));
   if(!a.geo.length)geoB.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No geo data (external mail only).</div>'));
   geoC.appendChild(geoB);grid3.appendChild(geoC);
   const tmC=el('<div class="card"><div class="card-h"><h3>Targeted mailboxes</h3></div></div>');
   const tmB=el('<div style="padding:6px 18px 14px"></div>');
-  a.targetedMailboxes.forEach(t=>tmB.appendChild(el(`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line2);font-size:13px"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.mailbox}</span><span class="mono" style="color:var(--muted)">${t.count.toLocaleString()}</span></div>`)));
+  const tmMax2=Math.max(1,...a.targetedMailboxes.map(t=>t.count));
+  a.targetedMailboxes.forEach(t=>tmB.appendChild(el(`<div style="margin:9px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--txt)">${t.mailbox}</span><span class="mono" style="color:var(--muted)">${t.count.toLocaleString()}</span></div>${stackedBar(t.byVerdict,tmMax2)}</div>`)));
   if(!a.targetedMailboxes.length)tmB.appendChild(el('<div style="color:var(--faint);font-size:13px;padding:10px 0">No data yet.</div>'));
   tmC.appendChild(tmB);grid3.appendChild(tmC);
   v.appendChild(grid3);
+  v.appendChild(el(`<div class="card p" style="margin-top:14px"><div style="font-size:12px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Legend</div>${verdictLegend()}</div>`));
   return v;
 }
 // Open a printable report → user saves as PDF via the browser.

@@ -168,8 +168,8 @@ export function buildApi() {
     const dispositions: Record<string, number> = {};
     const byDay: Record<string, { total: number; threats: number }> = {};
     const threatSenders: Record<string, number> = {};
-    const geo: Record<string, number> = {};
-    const mailboxes: Record<string, number> = {};
+    const geo: Record<string, Record<string, number>> = {};
+    const mailboxes: Record<string, Record<string, number>> = {};
     let processed = 0, threats = 0, quarantined = 0, clean = 0, msCaught = 0, spam = 0, policy = 0;
     for (const m of msgs) {
       const a = emailStore.analysisFor(m.id); if (!a) continue;
@@ -183,15 +183,16 @@ export function buildApi() {
       if (isThreat) { threats++; threatSenders[m.fromAddress] = (threatSenders[m.fromAddress] ?? 0) + 1; }
       if (a.disposition === 'quarantine' || a.disposition === 'remediated') quarantined++;
       if (m.msVerdict && m.msVerdict !== 'Not Spam') msCaught++;
-      if (m.senderCountry) geo[m.senderCountry] = (geo[m.senderCountry] ?? 0) + 1;
-      if (m.direction === 'inbound' && m.to) mailboxes[m.to] = (mailboxes[m.to] ?? 0) + 1;
+      if (m.senderCountry) { (geo[m.senderCountry] ??= {})[a.verdict] = ((geo[m.senderCountry][a.verdict]) ?? 0) + 1; }
+      if (m.direction === 'inbound' && m.to) { (mailboxes[m.to] ??= {})[a.verdict] = ((mailboxes[m.to][a.verdict]) ?? 0) + 1; }
       const day = (m.receivedAt || '').slice(0, 10);
       if (day) { (byDay[day] ??= { total: 0, threats: 0 }).total++; if (isThreat) byDay[day].threats++; }
     }
     const nonClean = processed - clean;
     const remediated = dispositions['remediated'] ?? 0;
-    const geoList = Object.entries(geo).sort(([, a], [, b]) => b - a).slice(0, 10).map(([country, count]) => ({ country, count }));
-    const targetedMailboxes = Object.entries(mailboxes).sort(([, a], [, b]) => b - a).slice(0, 10).map(([mailbox, count]) => ({ mailbox, count }));
+    const sumBy = (by: Record<string, number>) => Object.values(by).reduce((s, n) => s + n, 0);
+    const geoList = Object.entries(geo).map(([country, byVerdict]) => ({ country, count: sumBy(byVerdict), byVerdict })).sort((a, b) => b.count - a.count).slice(0, 10);
+    const targetedMailboxes = Object.entries(mailboxes).map(([mailbox, byVerdict]) => ({ mailbox, count: sumBy(byVerdict), byVerdict })).sort((a, b) => b.count - a.count).slice(0, 10);
     const daysSaved = Math.round((nonClean * 20) / 86400); // ~20s saved per non-clean email
 
     // previous-period counts for trend deltas
