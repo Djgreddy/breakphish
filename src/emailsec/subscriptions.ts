@@ -11,6 +11,7 @@ import { config } from '../config';
 import { dbEnabled, q } from '../db/db';
 import { appToken } from '../directory/graphProvider';
 import { store } from '../store';
+import { isUnscannable, markUnscannable, isUnscannableError } from './mailboxState';
 import { getConnection } from '../consent';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -57,7 +58,12 @@ export async function createSubscription(customerId: string, entraTenantId: stri
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ changeType: 'created', notificationUrl: notificationUrl(), resource, expirationDateTime: expiration, clientState }),
   });
-  if (!res.ok) { console.error(`[subs] create failed ${res.status}: ${await res.text()}`); return null; }
+  if (!res.ok) {
+    const txt = await res.text();
+    if (isUnscannableError(txt)) { markUnscannable(customerId, store.usersForTenant(customerId).find(u => u.externalId === userId)?.email || userId); }
+    else console.error(`[subs] create failed ${res.status}: ${txt}`);
+    return null;
+  }
   const j = (await res.json()) as { id: string };
   const s: Subscription = { id: j.id, customerId, userId, resource, clientState, expiration };
   subs.set(s.id, s); await persist(s);
@@ -92,6 +98,7 @@ export async function subscribeTenant(customerId: string): Promise<number> {
   let made = 0;
   for (const u of store.usersForTenant(customerId).filter(x => x.enabled)) {
     if (existing.has(u.externalId)) continue;
+    if (isUnscannable(customerId, u.email || u.externalId)) continue; // not REST-accessible — don't try
     const s = await createSubscription(customerId, conn.entraTenantId, u.externalId);
     if (s) made++;
   }

@@ -15,6 +15,7 @@ import { emailStore } from './store';
 import { applyDisposition, prependBanner, rewriteLinks } from './mailActions';
 import { getSettings } from '../settings';
 import { isActive } from '../onboarding';
+import { isUnscannable, markUnscannable, isUnscannableError } from './mailboxState';
 import { dlpMatch, hasActiveLinkRewrite } from '../policy';
 import { audit } from '../audit';
 import { config } from '../config';
@@ -305,13 +306,19 @@ export async function ingestTenantMail(tenantId: string): Promise<{ mailboxes: n
 
   const token = await appToken(conn.entraTenantId);
   const users = store.usersForTenant(tenantId).filter(u => u.enabled);
-  let scored = 0;
+  let scored = 0, scanned = 0;
   for (const u of users) {
     // Address the mailbox by email (UPN) — Graph resolves it reliably, unlike some
     // stored object IDs which can be stale/guest/corrupt (404 ErrorInvalidUser).
     const mailbox = u.email || u.externalId;
+    if (isUnscannable(tenantId, mailbox)) continue; // service/shared/on-prem — skip
+    scanned++;
     try { scored += await ingestMailbox(tenantId, conn.entraTenantId, t.verifiedDomains, mailbox, token); }
-    catch (e) { console.error(`[mailIngest] ${u.email}:`, (e as Error).message); }
+    catch (e) {
+      const msg = (e as Error).message;
+      if (isUnscannableError(msg)) { markUnscannable(tenantId, mailbox); } // don't retry next poll
+      else console.error(`[mailIngest] ${u.email}:`, msg);
+    }
   }
-  return { mailboxes: users.length, scored };
+  return { mailboxes: scanned, scored };
 }
