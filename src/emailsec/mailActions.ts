@@ -113,11 +113,12 @@ export async function currentFolder(entraTenantId: string, mailbox: string, inte
     }
     if (!folderId) return { folder: null, note: note || 'not found' };
 
-    const f = await fetch(`${base}/mailFolders/${encodeURIComponent(folderId)}?$select=displayName,wellKnownName`, { headers: H });
+    // mailFolder has no 'wellKnownName' property (selecting it → 400). displayName
+    // is already the friendly name: Inbox, Junk Email, Deleted Items, or a custom name.
+    const f = await fetch(`${base}/mailFolders/${encodeURIComponent(folderId)}?$select=displayName`, { headers: H });
     if (!f.ok) return { folder: null, note: `folder ${f.status}` };
-    const j: any = await f.json();
-    const wk = (j.wellKnownName ?? '').toLowerCase();
-    return { folder: WELL_KNOWN_FOLDER[wk] ?? j.displayName ?? null };
+    const name = ((await f.json()) as any).displayName ?? null;
+    return { folder: WELL_KNOWN_FOLDER[(name ?? '').toLowerCase().replace(/\s+/g, '')] ?? name };
   } catch (e) { return { folder: null, note: 'error: ' + (e as Error).message }; }
 }
 
