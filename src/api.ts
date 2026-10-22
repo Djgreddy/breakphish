@@ -618,10 +618,13 @@ export function buildApi() {
     const enrich = { queueId: m.id, senderIp: m.senderIp || '', country: m.senderCountry || '', msVerdict: m.msVerdict || '', context, rules: rule ? rule.label : '', senderIntel: baselineReason(m.tenantId, m.fromAddress), spamScore: Math.round(((a.signals ?? []).reduce((s: number, x: any) => s + (x.weight ?? 0), 0) / 14) * 100) / 100 };
     // Live lookup: where is this message right now in the mailbox?
     let currentFolderName: string | null = null;
+    let folderChecked = false;
     const connF = getConnection(m.tenantId);
     const mailbox = (m as any).mailboxUserId || m.to;
-    if (connF?.entraTenantId && mailbox && m.direction === 'inbound') {
-      try { currentFolderName = await currentFolder(connF.entraTenantId, mailbox, m.internetMessageId ?? "", m.id); } catch { /* ignore */ }
+    if (connF?.entraTenantId && mailbox && m.direction !== 'outbound') {
+      folderChecked = true;
+      try { currentFolderName = await currentFolder(connF.entraTenantId, mailbox, m.internetMessageId ?? '', m.id); }
+      catch (e) { console.error('[folder] lookup failed:', (e as Error).message); }
     }
     // All mailboxes this logical message was delivered to (distribution groups).
     const recipients = [...new Set(
@@ -629,7 +632,7 @@ export function buildApi() {
         .filter(x => x.tenantId === m.tenantId && x.internetMessageId === m.internetMessageId && x.to)
         .map(x => x.to!)
     )];
-    res.json({ message: { ...m, transportHops: hops, recipients, toHeader: (m as any).toHeader, currentFolder: currentFolderName }, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich, geoEnabled: geoEnabledFlag });
+    res.json({ message: { ...m, transportHops: hops, recipients, toHeader: (m as any).toHeader, currentFolder: currentFolderName, folderChecked }, analysis: a, verdictLabel: VERDICT_LABEL[a.verdict], events, enrich, geoEnabled: geoEnabledFlag });
   });
 
   // Remediate a delivered message now: move it to quarantine and mark it.
