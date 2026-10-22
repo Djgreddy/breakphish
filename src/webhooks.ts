@@ -16,6 +16,25 @@ import express from 'express';
 import { getSubscription } from './emailsec/subscriptions';
 import { getConnection } from './consent';
 import { ingestOneMessage } from './emailsec/mailIngest';
+
+// Global bounded work queue: at most MAX_CONCURRENT message ingests run at once,
+// no matter how many webhook notifications flood in. Extra work waits in line,
+// so a burst can't spawn hundreds of concurrent Graph calls and exhaust memory.
+const MAX_CONCURRENT = 4;
+const workQueue: Array<() => Promise<void>> = [];
+let activeWorkers = 0;
+function drainQueue() {
+  while (activeWorkers < MAX_CONCURRENT && workQueue.length) {
+    const task = workQueue.shift()!;
+    activeWorkers++;
+    task().finally(() => { activeWorkers--; drainQueue(); });
+  }
+}
+export function enqueueWork(task: () => Promise<void>) {
+  if (workQueue.length > 5000) { console.error('[webhook] queue overloaded, dropping notification'); return; }
+  workQueue.push(task);
+  drainQueue();
+}
 import { markWebhook } from './connHealth';
 
 export function buildWebhookApp() {
@@ -30,24 +49,25 @@ export function buildWebhookApp() {
   };
 
   const handler = async (req: express.Request, res: express.Response) => {
-    // notifications — ack fast, process async
+    // notifications — ack fast, process through a bounded queue (prevents a burst of
+    // notifications from spawning hundreds of concurrent Graph calls → OOM).
     const notifications: any[] = req.body?.value ?? [];
     res.status(202).send();
 
     for (const n of notifications) {
-      try {
-        const sub = getSubscription(n.subscriptionId);
-        if (!sub) { console.error('[webhook] unknown subscription', n.subscriptionId); continue; }
-        if (n.clientState && n.clientState !== sub.clientState) { console.error('[webhook] clientState mismatch'); continue; }
-        const conn = getConnection(sub.customerId);
-        const messageId = n.resourceData?.id;
-        if (!conn?.entraTenantId || !messageId) continue;
-        markWebhook(sub.customerId);
-        const disp = await ingestOneMessage(sub.customerId, conn.entraTenantId, sub.userId, messageId);
-        if (disp) console.log(`[webhook] scored ${messageId} → ${disp}`);
-      } catch (e) {
-        console.error('[webhook] processing error:', (e as Error).message);
-      }
+      const sub = getSubscription(n.subscriptionId);
+      if (!sub) { console.error('[webhook] unknown subscription', n.subscriptionId); continue; }
+      if (n.clientState && n.clientState !== sub.clientState) { console.error('[webhook] clientState mismatch'); continue; }
+      const conn = getConnection(sub.customerId);
+      const messageId = n.resourceData?.id;
+      if (!conn?.entraTenantId || !messageId) continue;
+      markWebhook(sub.customerId);
+      enqueueWork(async () => {
+        try {
+          const disp = await ingestOneMessage(sub.customerId, conn.entraTenantId!, sub.userId, messageId);
+          if (disp) console.log(`[webhook] scored ${messageId} → ${disp}`);
+        } catch (e) { console.error('[webhook] processing error:', (e as Error).message); }
+      });
     }
   };
 
